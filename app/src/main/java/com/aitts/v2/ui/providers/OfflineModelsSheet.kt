@@ -1,0 +1,95 @@
+package com.aitts.v2.ui.providers
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aitts.v2.model.OfflineCatalogData
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OfflineModelsSheet(
+    viewModel: ProvidersViewModel,
+    onDismiss: () -> Unit
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Sherpa-ONNX 离线模型库", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            if (!viewModel.offlineIncluded) {
+                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                    Text(
+                        "当前运行的是轻巧云端版 (Cloud APK)，未内置离线 C++ 推理库；如需本地推理请安装 Full ARM64 版。",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+
+            if (state.downloadingModelId != null) {
+                Text(state.downloadMessage, style = MaterialTheme.typography.bodySmall)
+                LinearProgressIndicator(
+                    progress = { (state.downloadProgress / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(OfflineCatalogData.models, key = { it.id }) { spec ->
+                    val installed = spec.id in state.downloadedModelIds
+                    val downloading = state.downloadingModelId == spec.id
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(spec.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${spec.arch.displayName} · ${spec.sizeMb}MB · ${spec.speakerCount}发音人",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = spec.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (installed) {
+                                OutlinedButton(onClick = { viewModel.deleteOfflineModel(spec.id) }) { Text("卸载") }
+                            } else {
+                                Button(
+                                    onClick = { viewModel.downloadOfflineModel(spec) },
+                                    enabled = state.downloadingModelId == null && !downloading
+                                ) { Text(if (downloading) "下载中" else "下载") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AI 语音引擎</string>
+    <string name="tts_service_name">AI 大模型语音引擎</string>
+</resources>

@@ -1,0 +1,72 @@
+package com.aitts.v2.di
+
+import android.content.Context
+import android.util.Log
+import com.aitts.v2.audio.AndroidAudioDecoder
+import com.aitts.v2.audio.StreamingAudioTrackPlayer
+import com.aitts.v2.data.AppPreferencesRepository
+import com.aitts.v2.data.BackupManager
+import com.aitts.v2.data.QuoteRepository
+import com.aitts.v2.data.SecretStore
+import com.aitts.v2.engine.audio.AudioPipeline
+import com.aitts.v2.engine.cache.AudioDiskCache
+import com.aitts.v2.engine.logging.EngineLogger
+import com.aitts.v2.engine.network.HttpClientManager
+import com.aitts.v2.engine.offline.OfflineModelInstaller
+import com.aitts.v2.engine.provider.TtsProviderRegistry
+import com.aitts.v2.engine.synthesis.SynthesisOrchestrator
+import com.aitts.v2.offline.PlatformOfflineBackend
+import com.aitts.v2.service.FloatingSubtitleOverlay
+import com.aitts.v2.service.SleepTimerController
+import java.io.File
+
+/**
+ * Clean manual dependency container for the entire app.
+ */
+class AppContainer(context: Context) {
+
+    private val appContext = context.applicationContext
+
+    val logger = EngineLogger(externalSink = { line -> Log.d("AiTtsV2", line) })
+    val httpManager = HttpClientManager()
+    val secretStore = SecretStore(appContext)
+    val preferences = AppPreferencesRepository(appContext, secretStore, httpManager)
+    val backupManager = BackupManager(preferences, secretStore)
+    val quoteRepository = QuoteRepository(httpManager)
+
+    val diskCache = AudioDiskCache(File(appContext.cacheDir, "tts_audio_cache_v2"))
+    val audioDecoder = AndroidAudioDecoder()
+    val audioPipeline = AudioPipeline(audioDecoder)
+    val previewPlayer = StreamingAudioTrackPlayer()
+
+    val offlineModelsDir: File = appContext.getExternalFilesDir("offline_models")
+        ?: File(appContext.filesDir, "offline_models")
+    val modelInstaller = OfflineModelInstaller(offlineModelsDir, httpManager)
+    val offlineIncluded: Boolean = PlatformOfflineBackend.isNativeRuntimeBundled()
+
+    val providerRegistry = TtsProviderRegistry(
+        httpManager = httpManager,
+        offlineProvider = PlatformOfflineBackend.createProvider(appContext, modelInstaller)
+    )
+
+    val orchestrator = SynthesisOrchestrator(
+        registry = providerRegistry,
+        audioPipeline = audioPipeline,
+        diskCache = diskCache,
+        httpManager = httpManager,
+        logger = logger
+    )
+
+    val sleepTimer = SleepTimerController(appContext)
+
+    val subtitleOverlay: FloatingSubtitleOverlay by lazy {
+        FloatingSubtitleOverlay(
+            appContext = appContext,
+            settingsProvider = { preferences.settingsFlow.value },
+            onPresetSelected = { preset ->
+                val cur = preferences.settingsFlow.value
+                preferences.updateSettings(cur.copy(floatingSubtitleNovelPreset = preset))
+            }
+        )
+    }
+}
