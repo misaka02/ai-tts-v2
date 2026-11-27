@@ -8,8 +8,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -29,6 +32,9 @@ class SleepTimerController(private val appContext: Context) {
     private val _isActiveFlow = MutableStateFlow(false)
     val isActiveFlow: StateFlow<Boolean> = _isActiveFlow.asStateFlow()
 
+    private val _expiredFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val expiredFlow: SharedFlow<Unit> = _expiredFlow.asSharedFlow()
+
     fun start(minutes: Int) {
         stop()
         if (minutes <= 0) return
@@ -47,6 +53,7 @@ class SleepTimerController(private val appContext: Context) {
             }
             _isActiveFlow.value = false
             _remainingSecondsFlow.value = 0
+            _expiredFlow.tryEmit(Unit)
             val stopIntent = Intent(PlaybackNotificationController.ACTION_STOP_TTS).setPackage(appContext.packageName)
             appContext.sendBroadcast(stopIntent)
         }

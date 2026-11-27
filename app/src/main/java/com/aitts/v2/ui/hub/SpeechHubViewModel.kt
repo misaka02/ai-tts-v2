@@ -14,6 +14,8 @@ import com.aitts.v2.model.LogEntry
 import com.aitts.v2.model.RequestLogSession
 import com.aitts.v2.model.SpeechHistoryItem
 import com.aitts.v2.model.TtsProviderConfig
+import com.aitts.v2.permission.AppPermissionState
+import com.aitts.v2.permission.PermissionHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,6 +40,15 @@ data class HubUiState(
     val isTestingPing: Boolean = false,
     val lastPingMs: Long? = null,
     val lastLatencyMs: Long? = null,
+    val activeSegmentText: String = "",
+    val segmentIndex: Int = 0,
+    val totalSegments: Int = 0,
+    val permissionState: AppPermissionState = AppPermissionState(
+        ignoringBatteryOptimizations = true,
+        notificationGranted = true,
+        overlayGranted = false,
+        isSystemDefaultTts = false
+    ),
     val canExport: Boolean = false,
     val statusMessage: String? = null
 )
@@ -70,8 +81,25 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
     private var previewJob: Job? = null
     private var lastSynthesizedPcm: ByteArray = ByteArray(0)
 
+    init {
+        viewModelScope.launch {
+            container.sleepTimer.expiredFlow.collect {
+                stopPreview()
+                _uiState.update { it.copy(statusMessage = "睡眠定时结束，已停止朗读") }
+            }
+        }
+    }
+
+    fun refreshPermissions(context: Context) {
+        _uiState.update { it.copy(permissionState = PermissionHelper.check(context)) }
+    }
+
     fun updateInputText(text: String) {
         _uiState.update { it.copy(inputText = text) }
+    }
+
+    fun loadHistoryItem(item: SpeechHistoryItem) {
+        _uiState.update { it.copy(inputText = item.text, quoteSource = "历史记录 · ${item.providerName}") }
     }
 
     fun consumeStatusMessage() {
@@ -93,23 +121,31 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun updateActiveSpeed(speed: Float) {
+    fun updateActiveVoice(speed: Float? = null, pitch: Float? = null, streaming: Boolean? = null) {
         val cur = container.preferences.getActiveProvider()
-        container.preferences.upsertProvider(cur.copy(speed = speed.coerceIn(0.4f, 2.5f)))
-    }
-
-    fun updateActivePitch(pitch: Float) {
-        val cur = container.preferences.getActiveProvider()
-        container.preferences.upsertProvider(cur.copy(pitch = pitch.coerceIn(0.5f, 2.0f)))
-    }
-
-    fun toggleStreaming(enabled: Boolean) {
-        val cur = container.preferences.getActiveProvider()
-        container.preferences.upsertProvider(cur.copy(isStreamingEnabled = enabled))
+        container.preferences.upsertProvider(
+            cur.copy(
+                speed = speed?.coerceIn(0.4f, 2.5f) ?: cur.speed,
+                pitch = pitch?.coerceIn(0.5f, 2.0f) ?: cur.pitch,
+                isStreamingEnabled = streaming ?: cur.isStreamingEnabled
+            )
+        )
     }
 
     fun selectActiveProvider(providerId: String) {
         container.preferences.setActiveProviderId(providerId)
+    }
+
+    fun toggleFloatingSubtitle(context: Context, enabled: Boolean) {
+        val perms = PermissionHelper.check(context)
+        _uiState.update { it.copy(permissionState = perms) }
+        if (enabled && !perms.overlayGranted) {
+            PermissionHelper.openOverlayPermission(context)
+            return
+        }
+        val cur = container.preferences.settingsFlow.value
+        container.preferences.updateSettings(cur.copy(isFloatingSubtitleEnabled = enabled))
+        if (enabled) container.subtitleOverlay.show() else container.subtitleOverlay.hide()
     }
 
     fun testActiveLatency() {
@@ -145,64 +181,85 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
         activeSessionId = sessionId
         val pcmCollector = ByteArrayOutputStream()
         val startMs = System.currentTimeMillis()
-        var firstAudioAt: Long? = null
 
-        _uiState.update { it.copy(isSynthesizing = true, isPlaying = false) }
+        _uiState.update { it.copy(isSynthesizing = true, isPlaying = false, activeSegmentText = "", segmentIndex = 0, totalSegments = 0) }
         previewJob = viewModelScope.launch(Dispatchers.IO) {
-            val active = container.preferences.getActiveProvider()
-            val input = SynthesisInput(
-                rawText = text,
-                settings = container.preferences.settingsFlow.value,
-                activeConfig = active,
-                allProviders = container.preferences.providersFlow.value,
-                rules = container.preferences.rulesFlow.value,
-                credentialsLookup = { id -> container.preferences.getCredentials(id) },
-                fadeGainProvider = { container.sleepTimer.getFadeVolumeFactor() },
-                onHistoryRecorded = { item -> container.preferences.recordSpeechHistory(item) }
-            )
-
-            val sink = object : SynthesisSink {
-                override fun onStart(sampleRate: Int): Boolean {
-                    container.previewPlayer.openStream(sampleRate)
-                    return true
-                }
-
-                override fun onPcmChunk(pcm16Bytes: ByteArray) {
-                    if (firstAudioAt == null) {
-                        firstAudioAt = System.currentTimeMillis() - startMs
-                        _uiState.update { it.copy(isSynthesizing = false, isPlaying = true, lastLatencyMs = firstAudioAt) }
-                    }
-                    pcmCollector.write(pcm16Bytes)
-                    container.previewPlayer.writeChunk(pcm16Bytes)
-                }
-
-                override fun onDone() {
-                    container.previewPlayer.finishStream()
-                    val collected = pcmCollector.toByteArray()
-                    if (collected.isNotEmpty()) lastSynthesizedPcm = collected
-                    _uiState.update {
-                        it.copy(
-                            isSynthesizing = false,
-                            isPlaying = false,
-                            canExport = lastSynthesizedPcm.isNotEmpty(),
-                            lastLatencyMs = firstAudioAt ?: (System.currentTimeMillis() - startMs)
-                        )
-                    }
-                }
-
-                override fun onError(error: Throwable) {
-                    container.previewPlayer.stop()
-                    _uiState.update {
-                        it.copy(isSynthesizing = false, isPlaying = false, statusMessage = "合成失败: ${error.message}")
-                    }
-                }
-            }
-
+            val input = createSynthesisInput(text)
+            val sink = createPreviewSink(pcmCollector, startMs)
             try {
                 container.orchestrator.execute(sessionId, input, sink)
             } catch (_: CancellationException) {
                 container.previewPlayer.stop()
-                _uiState.update { it.copy(isSynthesizing = false, isPlaying = false) }
+                _uiState.update { it.copy(isSynthesizing = false, isPlaying = false, activeSegmentText = "") }
+            }
+        }
+    }
+
+    private fun createSynthesisInput(text: String): SynthesisInput {
+        val active = container.preferences.getActiveProvider()
+        return SynthesisInput(
+            rawText = text,
+            settings = container.preferences.settingsFlow.value,
+            activeConfig = active,
+            allProviders = container.preferences.providersFlow.value,
+            rules = container.preferences.rulesFlow.value,
+            credentialsLookup = { id -> container.preferences.getCredentials(id) },
+            fadeGainProvider = { container.sleepTimer.getFadeVolumeFactor() },
+            onHistoryRecorded = { item -> container.preferences.recordSpeechHistory(item) }
+        )
+    }
+
+    private fun createPreviewSink(pcmCollector: ByteArrayOutputStream, startMs: Long): SynthesisSink {
+        var firstAudioAt: Long? = null
+        return object : SynthesisSink {
+            override fun onStart(sampleRate: Int): Boolean {
+                container.previewPlayer.openStream(sampleRate)
+                return true
+            }
+
+            override fun onSegmentStart(segmentIndex: Int, totalSegments: Int, text: String) {
+                _uiState.update {
+                    it.copy(activeSegmentText = text, segmentIndex = segmentIndex + 1, totalSegments = totalSegments)
+                }
+                if (container.preferences.settingsFlow.value.isFloatingSubtitleEnabled) {
+                    container.subtitleOverlay.updateText(text)
+                }
+            }
+
+            override fun onPcmChunk(pcm16Bytes: ByteArray) {
+                if (firstAudioAt == null) {
+                    firstAudioAt = System.currentTimeMillis() - startMs
+                    _uiState.update { it.copy(isSynthesizing = false, isPlaying = true, lastLatencyMs = firstAudioAt) }
+                }
+                pcmCollector.write(pcm16Bytes)
+                container.previewPlayer.writeChunk(pcm16Bytes)
+            }
+
+            override fun onDone() {
+                container.previewPlayer.finishStream()
+                val collected = pcmCollector.toByteArray()
+                if (collected.isNotEmpty()) lastSynthesizedPcm = collected
+                _uiState.update {
+                    it.copy(
+                        isSynthesizing = false,
+                        isPlaying = false,
+                        activeSegmentText = "",
+                        canExport = lastSynthesizedPcm.isNotEmpty(),
+                        lastLatencyMs = firstAudioAt ?: (System.currentTimeMillis() - startMs)
+                    )
+                }
+            }
+
+            override fun onError(error: Throwable) {
+                container.previewPlayer.stop()
+                _uiState.update {
+                    it.copy(
+                        isSynthesizing = false,
+                        isPlaying = false,
+                        activeSegmentText = "",
+                        statusMessage = "合成失败: ${error.message}"
+                    )
+                }
             }
         }
     }
@@ -213,7 +270,7 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
         previewJob?.cancel()
         previewJob = null
         container.previewPlayer.stop()
-        _uiState.update { it.copy(isSynthesizing = false, isPlaying = false) }
+        _uiState.update { it.copy(isSynthesizing = false, isPlaying = false, activeSegmentText = "") }
     }
 
     fun exportLastAudio(context: Context) {
@@ -231,8 +288,9 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun startSleepTimer(minutes: Int) = container.sleepTimer.start(minutes)
-    fun stopSleepTimer() = container.sleepTimer.stop()
+    fun setSleepTimer(minutes: Int) {
+        if (minutes <= 0) container.sleepTimer.stop() else container.sleepTimer.start(minutes)
+    }
     fun clearHistory() = container.preferences.clearHistory()
     fun clearLogs() = container.logger.clear()
 

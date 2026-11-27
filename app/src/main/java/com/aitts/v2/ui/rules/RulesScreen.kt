@@ -1,7 +1,7 @@
 package com.aitts.v2.ui.rules
 
 import android.widget.Toast
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,24 +12,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,16 +41,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aitts.v2.engine.text.TextPipeline
 import com.aitts.v2.model.ReplacementRule
 import com.aitts.v2.model.RuleCategory
+import com.aitts.v2.ui.theme.InkPaperCard
+import com.aitts.v2.ui.theme.InkSectionHeader
+import com.aitts.v2.ui.theme.InkStatusPill
+import com.aitts.v2.ui.theme.PillTone
 
 @Composable
 fun RulesScreen(viewModel: RulesViewModel) {
     val context = LocalContext.current
     val rules by viewModel.rulesFlow.collectAsStateWithLifecycle()
+    val settings by viewModel.settingsFlow.collectAsStateWithLifecycle()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     var editingRule by remember { mutableStateOf<ReplacementRule?>(null) }
@@ -67,9 +74,17 @@ fun RulesScreen(viewModel: RulesViewModel) {
         val cat = state.selectedCategory
         if (cat == null) rules else rules.filter { it.category == cat }
     }
+    val processedPreview = remember(state.previewInput, rules, settings) {
+        TextPipeline.preprocessFlat(
+            rawText = state.previewInput,
+            rules = rules,
+            enableNumbers = settings.isNumberNormalizationEnabled,
+            enableAcronyms = settings.isAcronymNormalizationEnabled
+        )
+    }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -80,15 +95,15 @@ fun RulesScreen(viewModel: RulesViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("发音规则流水线", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("发音词典", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        text = "共 ${rules.size} 条替换规则",
+                        text = "共 ${rules.size} 条纠音与净化规则",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Button(onClick = { showCreateDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("新增")
                 }
@@ -96,31 +111,44 @@ fun RulesScreen(viewModel: RulesViewModel) {
         }
 
         item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("实时预处理测试", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(
-                        value = state.previewInput,
-                        onValueChange = viewModel::updatePreviewInput,
-                        label = { Text("输入测试原文") },
-                        modifier = Modifier.fillMaxWidth()
+            InkSectionHeader("实时预处理工作台")
+            Spacer(Modifier.size(6.dp))
+            InkPaperCard(padding = 14.dp) {
+                OutlinedTextField(
+                    value = state.previewInput,
+                    onValueChange = viewModel::updatePreviewInput,
+                    label = { Text("输入测试原文") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = settings.isNumberNormalizationEnabled,
+                        onClick = { viewModel.toggleNumberNormalization(!settings.isNumberNormalizationEnabled) },
+                        label = { Text("数字规整") }
                     )
-                    Text(
-                        text = "输出: ${viewModel.previewProcessed(state.previewInput)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
+                    FilterChip(
+                        selected = settings.isAcronymNormalizationEnabled,
+                        onClick = { viewModel.toggleAcronymNormalization(!settings.isAcronymNormalizationEnabled) },
+                        label = { Text("英文缩写") }
                     )
+                }
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("管线输出预览", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(processedPreview, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = viewModel::importXianxiaPack, modifier = Modifier.weight(1f)) { Text("+修仙多音字") }
-                OutlinedButton(onClick = viewModel::importNovelSymbolsPack, modifier = Modifier.weight(1f)) { Text("+符号净化") }
+                OutlinedButton(onClick = viewModel::importXianxiaPack, modifier = Modifier.weight(1f)) { Text("+ 修仙多音字") }
+                OutlinedButton(onClick = viewModel::importNovelSymbolsPack, modifier = Modifier.weight(1f)) { Text("+ 符号净化") }
                 OutlinedButton(onClick = { viewModel.batchToggle(true) }) { Text("全开") }
                 OutlinedButton(onClick = { viewModel.batchToggle(false) }) { Text("全关") }
             }
@@ -143,39 +171,12 @@ fun RulesScreen(viewModel: RulesViewModel) {
         }
 
         items(filtered, key = { it.id }) { rule ->
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                modifier = Modifier.fillMaxWidth().clickable { editingRule = rule }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(
-                            text = rule.description.ifBlank { "${rule.pattern} -> ${rule.replacement}" },
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "[${rule.category.label}] ${if (rule.isRegex) "正则" else "字面"}: ${rule.pattern} -> ${rule.replacement}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { editingRule = rule }) {
-                            Icon(Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(18.dp))
-                        }
-                        IconButton(onClick = { viewModel.deleteRule(rule.id) }) {
-                            Icon(Icons.Default.Delete, contentDescription = "删除", modifier = Modifier.size(18.dp))
-                        }
-                        Switch(checked = rule.enabled, onCheckedChange = { viewModel.toggleRule(rule, it) })
-                    }
-                }
-            }
+            RuleItemCard(
+                rule = rule,
+                onEdit = { editingRule = rule },
+                onDelete = { viewModel.deleteRule(rule.id) },
+                onToggle = { viewModel.toggleRule(rule, it) }
+            )
         }
     }
 
@@ -193,5 +194,48 @@ fun RulesScreen(viewModel: RulesViewModel) {
             onSave = { viewModel.saveRule(it); editingRule = null },
             onDismiss = { editingRule = null }
         )
+    }
+}
+
+@Composable
+private fun RuleItemCard(
+    rule: ReplacementRule,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onToggle: (Boolean) -> Unit
+) {
+    InkPaperCard(padding = 12.dp, onClick = onEdit) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = rule.description.ifBlank { "自定义词条" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    InkStatusPill(rule.category.label, PillTone.NEUTRAL)
+                    if (rule.isRegex) InkStatusPill("正则", PillTone.ACCENT)
+                }
+                Text(
+                    text = "${rule.pattern} → ${rule.replacement.ifEmpty { "∅ (删除)" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Outlined.Edit, contentDescription = "编辑", modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "删除", modifier = Modifier.size(18.dp))
+                }
+                Switch(checked = rule.enabled, onCheckedChange = onToggle)
+            }
+        }
     }
 }

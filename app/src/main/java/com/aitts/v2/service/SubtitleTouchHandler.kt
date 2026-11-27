@@ -24,6 +24,7 @@ internal object SubtitleTouchHandler {
         isAttachedProvider: () -> Boolean,
         settingsProvider: () -> GlobalSettings,
         onToggleExpand: (Boolean) -> Unit,
+        onDragEnd: (Int) -> Unit = {},
         dpFn: (Float) -> Int
     ) {
         var startX = 0
@@ -80,6 +81,8 @@ internal object SubtitleTouchHandler {
                         expanded = !expanded
                         textView.maxLines = if (expanded) 14 else current.floatingSubtitleMaxLines.coerceIn(1, 8)
                         onToggleExpand(expanded)
+                    } else {
+                        onDragEnd(lp.y)
                     }
                     true
                 }

@@ -30,14 +30,16 @@ class SecretStore(context: Context) {
         }.getOrDefault(ProviderCredentials())
     }
 
-    fun saveCredentials(providerId: String, credentials: ProviderCredentials) {
+    fun saveCredentials(providerId: String, credentials: ProviderCredentials): Boolean {
         if (credentials.apiKey.isBlank() && credentials.secondaryApiKey.isBlank()) {
             prefs.edit().remove(providerId).apply()
-            return
+            return true
         }
-        val plaintext = json.encodeToString(credentials)
-        val encrypted = encrypt(plaintext)
-        prefs.edit().putString(providerId, encrypted).apply()
+        return runCatching {
+            val plaintext = json.encodeToString(credentials)
+            val encrypted = encrypt(plaintext)
+            prefs.edit().putString(providerId, encrypted).apply()
+        }.isSuccess
     }
 
     fun removeCredentials(providerId: String) {

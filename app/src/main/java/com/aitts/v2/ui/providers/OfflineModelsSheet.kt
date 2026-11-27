@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,6 +26,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.model.OfflineCatalogData
+import com.aitts.v2.ui.theme.InkPaperCard
+import com.aitts.v2.ui.theme.InkStatusPill
+import com.aitts.v2.ui.theme.PillTone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,13 +38,16 @@ fun OfflineModelsSheet(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Text("Sherpa-ONNX 离线模型库", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             if (!viewModel.offlineIncluded) {
                 Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.errorContainer) {
                     Text(
-                        "当前运行的是轻巧云端版 (Cloud APK)，未内置离线 C++ 推理库；如需本地推理请安装 Full ARM64 版。",
+                        "当前运行的是纯云端版 (Cloud APK)，未内置离线 C++ 推理库；如需离线语音请安装 Full ARM64 版。",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(10.dp)
                     )
@@ -59,14 +66,17 @@ fun OfflineModelsSheet(
                 items(OfflineCatalogData.models, key = { it.id }) { spec ->
                     val installed = spec.id in state.downloadedModelIds
                     val downloading = state.downloadingModelId == spec.id
-                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                    InkPaperCard(highlighted = installed, padding = 12.dp) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(spec.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(spec.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    if (installed) InkStatusPill("已就绪", PillTone.SUCCESS)
+                                }
                                 Text(
                                     "${spec.arch.displayName} · ${spec.sizeMb}MB · ${spec.speakerCount}发音人",
                                     style = MaterialTheme.typography.labelSmall,

@@ -44,6 +44,16 @@ class RulesViewModel(private val container: AppContainer) : ViewModel() {
     fun toggleRule(rule: ReplacementRule, enabled: Boolean) =
         container.preferences.upsertRule(rule.copy(enabled = enabled))
 
+    fun toggleNumberNormalization(enabled: Boolean) {
+        val cur = settingsFlow.value
+        container.preferences.updateSettings(cur.copy(isNumberNormalizationEnabled = enabled))
+    }
+
+    fun toggleAcronymNormalization(enabled: Boolean) {
+        val cur = settingsFlow.value
+        container.preferences.updateSettings(cur.copy(isAcronymNormalizationEnabled = enabled))
+    }
+
     fun saveRule(rule: ReplacementRule) {
         val fixed = if (rule.id.isBlank()) rule.copy(id = "rule_${UUID.randomUUID().toString().take(6)}") else rule
         container.preferences.upsertRule(fixed)

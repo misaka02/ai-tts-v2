@@ -39,10 +39,10 @@ enum class ThemeMode(val displayName: String) {
 
 @Serializable
 enum class ThemePalette(val displayName: String, val seedHex: Long) {
-    OCEAN_AZURE("晴空蓝", 0xFF1A73E8),
-    EMERALD_JADE("翡翠青", 0xFF0F9D58),
-    SLATE_TITANIUM("钛灰紫", 0xFF5C6BC0),
-    WARM_AMBER("暖阳琥珀", 0xFFE37400)
+    OCEAN_AZURE("靛蓝印泥", 0xFF26537C),
+    EMERALD_JADE("松烟竹青", 0xFF24614B),
+    SLATE_TITANIUM("紫檀砚灰", 0xFF4E4A75),
+    WARM_AMBER("朱砂琥珀", 0xFFA8551E)
 }
 
 @Serializable
@@ -107,5 +107,6 @@ data class GlobalSettings(
     val floatingSubtitleLockPosition: Boolean = false,
     val floatingSubtitleShowIcon: Boolean = true,
     val floatingSubtitleAdaptiveContrast: Boolean = true,
-    val floatingSubtitleNovelPreset: SubtitleNovelPreset = SubtitleNovelPreset.AUTO
+    val floatingSubtitleNovelPreset: SubtitleNovelPreset = SubtitleNovelPreset.AUTO,
+    val floatingSubtitleY: Int = -1
 )

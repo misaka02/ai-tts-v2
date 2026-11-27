@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -38,27 +39,40 @@ fun RuleEditDialog(
     var isCaseSensitive by remember { mutableStateOf(initial.isCaseSensitive) }
     var category by remember { mutableStateOf(initial.category) }
 
+    val regexError = remember(pattern, isRegex) {
+        if (!isRegex || pattern.isBlank()) {
+            null
+        } else {
+            runCatching { Regex(pattern) }.exceptionOrNull()?.message
+        }
+    }
+    val canSave = pattern.isNotBlank() && regexError == null
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial.id.isBlank()) "新增发音规则" else "编辑发音规则") },
+        title = { Text(if (initial.id.isBlank()) "新增词典规则" else "编辑词典规则") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("规则说明") },
+                    label = { Text("词条说明") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = pattern,
                     onValueChange = { pattern = it },
                     label = { Text("匹配表达式 / 原文") },
+                    isError = regexError != null,
+                    supportingText = regexError?.let { err ->
+                        { Text("正则表达式语法错误: $err", color = MaterialTheme.colorScheme.error) }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = replacement,
                     onValueChange = { replacement = it },
-                    label = { Text("替换为") },
+                    label = { Text("替换为 (留空即删除)") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -67,7 +81,7 @@ fun RuleEditDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("正则表达式")
+                    Text("启用正则表达式")
                     Switch(checked = isRegex, onCheckedChange = { isRegex = it })
                 }
                 Row(
@@ -87,19 +101,18 @@ fun RuleEditDialog(
         },
         confirmButton = {
             Button(
+                enabled = canSave,
                 onClick = {
-                    if (pattern.isNotBlank()) {
-                        onSave(
-                            initial.copy(
-                                pattern = pattern,
-                                replacement = replacement,
-                                description = description.trim(),
-                                isRegex = isRegex,
-                                isCaseSensitive = isCaseSensitive,
-                                category = category
-                            )
+                    onSave(
+                        initial.copy(
+                            pattern = pattern,
+                            replacement = replacement,
+                            description = description.trim(),
+                            isRegex = isRegex,
+                            isCaseSensitive = isCaseSensitive,
+                            category = category
                         )
-                    }
+                    )
                 }
             ) { Text("保存") }
         },

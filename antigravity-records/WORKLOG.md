@@ -73,3 +73,24 @@
 3. **GitHub 仓库创建与 v2.0.0 发布**：
    - 新建公开仓库 `https://github.com/misaka02/ai-tts-v2` 并推送 `main` 分支。
    - 推送标签 `v2.0.0` 并发布 GitHub Release：`https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0`，已上传附件 `ai-tts-v2-cloud-v2.0.0.apk`（`1,778,797` 字节）与 `ai-tts-v2-full-arm64-v2.0.0.apk`（`25,469,263` 字节）。
+
+## 6. 纸墨听书 UI 重设计与全功能缺陷修复（2026-11-27）
+1. **底层功能缺陷全量核查与修复**：
+   - **流式历史漏记** ([SynthesisOrchestrator.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/synthesis/SynthesisOrchestrator.kt))：`streamOrFallback` 缓存命中与原生流式成功返回时补全 `SynthesisHelpers.recordHistory` 调用，并在 [SynthesisOrchestratorTest.kt](../core-engine/src/test/kotlin/com/aitts/v2/engine/synthesis/SynthesisOrchestratorTest.kt) 增加单测。
+   - **系统 TTS 多音色路由** ([AiTextToSpeechService.kt](../app/src/main/java/com/aitts/v2/service/AiTextToSpeechService.kt))：新增 `resolveProviderForRequest(request.voiceName)` 按配置 ID/名称或 Edge 音色名路由，不再忽略外部应用传入音色。
+   - **睡眠定时与界面状态同步** ([SleepTimerController.kt](../app/src/main/java/com/aitts/v2/service/SleepTimerController.kt)、[SpeechHubViewModel.kt](../app/src/main/java/com/aitts/v2/ui/hub/SpeechHubViewModel.kt))：增加 `expiredFlow` 自动中止应用内试听与播报。
+   - **悬浮字幕坐标与关闭同步** ([GlobalSettings.kt](../core-model/src/main/kotlin/com/aitts/v2/model/GlobalSettings.kt)、[SubtitleTouchHandler.kt](../app/src/main/java/com/aitts/v2/service/SubtitleTouchHandler.kt)、[FloatingSubtitleOverlay.kt](../app/src/main/java/com/aitts/v2/service/FloatingSubtitleOverlay.kt)、[AppContainer.kt](../app/src/main/java/com/aitts/v2/di/AppContainer.kt))：持久化拖拽纵坐标 `floatingSubtitleY`（旧配置缺省 `-1` 向后兼容），关闭弹窗回调同步偏好开关，App 内试听同步推送逐段字幕。
+   - **删除首选引擎自动接替 & Keystore 容错** ([AppPreferencesRepository.kt](../app/src/main/java/com/aitts/v2/data/AppPreferencesRepository.kt)、[SecretStore.kt](../app/src/main/java/com/aitts/v2/data/SecretStore.kt))。
+   - **引擎试听效果对齐 & 实时权限状态** ([ProvidersViewModel.kt](../app/src/main/java/com/aitts/v2/ui/providers/ProvidersViewModel.kt)、[PermissionHelper.kt](../app/src/main/java/com/aitts/v2/permission/PermissionHelper.kt)、[SettingsViewModel.kt](../app/src/main/java/com/aitts/v2/ui/settings/SettingsViewModel.kt))：补齐客户端 Sonic 变速与 `AudioEnhancer` 预览增强、增加 `tts_default_synth` 默认 TTS 引擎检测及页面 `ON_RESUME` 自动刷新。
+2. **「纸墨听书 (Editorial Ink)」全套 UI 重设计**：
+   - 新增设计系统与组件：[Theme.kt](../app/src/main/java/com/aitts/v2/ui/theme/Theme.kt)、[InkComponents.kt](../app/src/main/java/com/aitts/v2/ui/theme/InkComponents.kt)、[PillTone.kt](../app/src/main/java/com/aitts/v2/ui/theme/PillTone.kt)、定制底栏 [AiTtsAppRoot.kt](../app/src/main/java/com/aitts/v2/ui/navigation/AiTtsAppRoot.kt)。
+   - 四页与二级弹窗重制：[SpeechHubScreen.kt](../app/src/main/java/com/aitts/v2/ui/hub/SpeechHubScreen.kt)、[SpeechHubCards.kt](../app/src/main/java/com/aitts/v2/ui/hub/SpeechHubCards.kt)、[VoiceTunerSheet.kt](../app/src/main/java/com/aitts/v2/ui/hub/VoiceTunerSheet.kt)、[ProvidersScreen.kt](../app/src/main/java/com/aitts/v2/ui/providers/ProvidersScreen.kt)、[ProviderEditScreen.kt](../app/src/main/java/com/aitts/v2/ui/providers/ProviderEditScreen.kt)（中文类型标签、密钥显隐遮罩、可用模型/音色双选择列表、离线库直达）、[RulesScreen.kt](../app/src/main/java/com/aitts/v2/ui/rules/RulesScreen.kt)（规范化开关实时联动）、[RuleDialogs.kt](../app/src/main/java/com/aitts/v2/ui/rules/RuleDialogs.kt)（正则语法实时校验）、[SettingsScreen.kt](../app/src/main/java/com/aitts/v2/ui/settings/SettingsScreen.kt)、[SettingsSections.kt](../app/src/main/java/com/aitts/v2/ui/settings/SettingsSections.kt)、[SettingsDialogs.kt](../app/src/main/java/com/aitts/v2/ui/settings/SettingsDialogs.kt)（补全 SAF JSON 文件导入导出与网络超时配置）、[SubtitleCustomizerSheet.kt](../app/src/main/java/com/aitts/v2/ui/settings/SubtitleCustomizerSheet.kt)（内置实时视觉预览卡片）。
+3. **Qodo CLI 审查与修复闭环**：
+   - 调用 `C:\Users\s1356\.qodo\bin\qodo.exe review --target main --json --context-file -` 针对 `origin/main`（`05853ebcf`）完整审查（`233,022B` 差异），返回 `4` 条发现：
+     - 已修复 3 条有效缺陷：`ProvidersViewModel.stopPreview()` 退出未复位 `isTestingSingle`、`InkWaveformCanvas` 闲置状态无谓持续动画、`InkStatusPill` 深色模式状态文字对比度不足。
+     - 独立核实 1 条为误报：`FloatingSubtitleOverlay.kt` 关闭按钮已携带 `EXTRA_FORCE_DISABLE = true`，接收端不会反转重开。
+4. **最终门禁与 R8 产物核验（全部修改后实测）**：
+   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）。
+   - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 2m 1s`，`27/27` 单元测试全部通过：`:core-model:test` `5`、`:core-engine:test` `20`、`:app:testCloudDebugUnitTest` `2`）。
+   - `app/build/outputs/apk/cloud/release/app-cloud-release.apk`：`1,827,949` 字节（约 `1.74 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。
+   - `app/build/outputs/apk/full/release/app-full-release.apk`：`25,502,031` 字节（约 `24.32 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。

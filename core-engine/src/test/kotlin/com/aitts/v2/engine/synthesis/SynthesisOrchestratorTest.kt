@@ -137,6 +137,58 @@ class SynthesisOrchestratorTest {
         assertEquals(1, batchCalls.get())
     }
 
+    @Test
+    fun `streaming synthesis records history item`() = runTest {
+        val http = HttpClientManager()
+        val logger = EngineLogger()
+        val cache = AudioDiskCache(tempFolder.newFolder("cache3"))
+        val audioPipeline = AudioPipeline { bytes, rate -> Result.success(DecodedPcm(bytes, rate, 1)) }
+
+        val streamProvider = object : TtsProvider {
+            override val type = ProviderType.OFFLINE_SHERPA
+            override val capabilities = ProviderCapabilities(supportsNativePcmStreaming = true)
+            override suspend fun fetchVoices(config: TtsProviderConfig, credentials: ProviderCredentials): List<VoiceModel> = emptyList()
+            override suspend fun synthesizeStream(
+                request: ProviderSynthesisRequest,
+                onChunk: suspend (PcmStreamChunk) -> Unit
+            ): Result<SynthesizedAudio> {
+                val pcm = ByteArray(1024)
+                onChunk(PcmStreamChunk(pcm, 24000))
+                return Result.success(SynthesizedAudio(pcm, 24000, isRawPcm = true))
+            }
+            override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> =
+                Result.failure(IOException("unused"))
+        }
+
+        val registry = TtsProviderRegistry(http, offlineProvider = streamProvider)
+        val orchestrator = SynthesisOrchestrator(registry, audioPipeline, cache, http, logger)
+        val cfg = TtsProviderConfig(
+            id = "stream_1",
+            type = ProviderType.OFFLINE_SHERPA,
+            name = "StreamEngine",
+            voiceId = "v1",
+            isStreamingEnabled = true
+        )
+        val recorded = mutableListOf<String>()
+
+        orchestrator.execute(
+            "sess_stream",
+            SynthesisInput(
+                rawText = "流式历史记录校验",
+                settings = GlobalSettings(isSentenceSplittingEnabled = false, isAudioCacheEnabled = false),
+                activeConfig = cfg,
+                allProviders = listOf(cfg),
+                rules = emptyList(),
+                credentialsLookup = { ProviderCredentials() },
+                onHistoryRecorded = { item -> recorded.add(item.providerName) }
+            ),
+            recordingSink {}
+        )
+
+        assertEquals(1, recorded.size)
+        assertTrue(recorded.first().contains("流式"))
+    }
+
     private fun recordingSink(onComplete: () -> Unit) = object : SynthesisSink {
         override fun onStart(sampleRate: Int) = true
         override fun onPcmChunk(pcm16Bytes: ByteArray) {}

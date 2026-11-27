@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,10 +40,12 @@ fun ProxyConfigDialog(
     var type by remember { mutableStateOf(settings.proxyType) }
     var host by remember { mutableStateOf(settings.proxyHost) }
     var port by remember { mutableStateOf(settings.proxyPort.toString()) }
+    var connectTimeout by remember { mutableStateOf(settings.connectTimeoutSeconds.toString()) }
+    var readTimeout by remember { mutableStateOf(settings.readTimeoutSeconds.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("网络代理设置") },
+        title = { Text("网络代理与超时") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -58,12 +62,37 @@ fun ProxyConfigDialog(
                 }
                 OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text("代理主机") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = port, onValueChange = { port = it }, label = { Text("端口") }, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = connectTimeout,
+                        onValueChange = { connectTimeout = it },
+                        label = { Text("连接超时(s)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = readTimeout,
+                        onValueChange = { readTimeout = it },
+                        label = { Text("读取超时(s)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         },
         confirmButton = {
             Button(onClick = {
-                val parsedPort = port.toIntOrNull() ?: 7890
-                onSave(settings.copy(proxyEnabled = enabled, proxyType = type, proxyHost = host.trim(), proxyPort = parsedPort))
+                val parsedPort = (port.toIntOrNull() ?: 7890).coerceIn(1, 65535)
+                val connSec = (connectTimeout.toIntOrNull() ?: 15).coerceIn(3, 120)
+                val readSec = (readTimeout.toIntOrNull() ?: 60).coerceIn(5, 300)
+                onSave(
+                    settings.copy(
+                        proxyEnabled = enabled,
+                        proxyType = type,
+                        proxyHost = host.trim(),
+                        proxyPort = parsedPort,
+                        connectTimeoutSeconds = connSec,
+                        readTimeoutSeconds = readSec
+                    )
+                )
             }) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
@@ -80,6 +109,36 @@ fun BackupDialog(
     var includeSecrets by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
 
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            val payload = onExport(includeSecrets)
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(payload.toByteArray(Charsets.UTF_8))
+            } ?: error("无法写入目标文件")
+        }.onSuccess {
+            Toast.makeText(context, "备份文件已导出", Toast.LENGTH_SHORT).show()
+        }.onFailure { err ->
+            Toast.makeText(context, "导出失败: ${err.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: error("无法读取备份文件")
+        }.onSuccess { text ->
+            onImport(text)
+        }.onFailure { err ->
+            Toast.makeText(context, "读取失败: ${err.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("配置备份与恢复") },
@@ -88,6 +147,16 @@ fun BackupDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = includeSecrets, onCheckedChange = { includeSecrets = it })
                     Text("导出时包含 API Key (默认已脱敏)")
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { exportLauncher.launch("aitts-v2-backup.json") },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("导出 JSON 文件") }
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("application/json", "text/*")) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("从文件导入") }
                 }
                 OutlinedButton(
                     onClick = {
@@ -108,7 +177,7 @@ fun BackupDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { if (importText.isNotBlank()) onImport(importText) }) { Text("恢复配置") }
+            Button(onClick = { if (importText.isNotBlank()) onImport(importText) }) { Text("从文本恢复") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
     )
@@ -122,7 +191,7 @@ fun ConfirmResetDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("恢复默认设置？") },
-        text = { Text("将重置全局参数、引擎列表与替换规则为默认值，已加密保存的密钥保留。") },
+        text = { Text("将重置全局参数、引擎列表与词典规则为默认值，已加密保存的 Keystore 密钥保留。") },
         confirmButton = { Button(onClick = onConfirm) { Text("确认重置") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )

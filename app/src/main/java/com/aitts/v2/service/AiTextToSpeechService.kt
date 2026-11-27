@@ -19,6 +19,8 @@ import com.aitts.v2.di.AppContainer
 import com.aitts.v2.engine.synthesis.SynthesisInput
 import com.aitts.v2.engine.synthesis.SynthesisSink
 import com.aitts.v2.model.PresetVoices
+import com.aitts.v2.model.ProviderType
+import com.aitts.v2.model.TtsProviderConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import java.util.Locale
@@ -113,7 +115,7 @@ class AiTextToSpeechService : TextToSpeechService() {
 
         requestFocus()
         val settings = container.preferences.settingsFlow.value
-        val activeProvider = container.preferences.getActiveProvider()
+        val activeProvider = resolveProviderForRequest(request.voiceName)
         val input = SynthesisInput(
             rawText = text,
             settings = settings,
@@ -205,6 +207,27 @@ class AiTextToSpeechService : TextToSpeechService() {
 
     override fun onGetDefaultVoiceNameFor(lang: String?, country: String?, variant: String?): String =
         container.preferences.getActiveProvider().let { it.name.ifBlank { it.voiceId.ifBlank { "zh-CN-XiaoxiaoNeural" } } }
+
+    private fun resolveProviderForRequest(voiceName: String?): TtsProviderConfig {
+        val target = voiceName?.trim().orEmpty()
+        val providers = container.preferences.providersFlow.value
+        val active = container.preferences.getActiveProvider()
+        if (target.isBlank()) return active
+
+        providers.firstOrNull { it.id == target || it.name == target }?.let { return it }
+
+        val isKnownEdgeVoice = PresetVoices.edgeVoices.any { it.id == target } || target.endsWith("Neural")
+        if (isKnownEdgeVoice) {
+            val edgeCfg = if (active.type == ProviderType.EDGE_TTS) {
+                active
+            } else {
+                providers.firstOrNull { it.type == ProviderType.EDGE_TTS && it.enabled }
+                    ?: providers.firstOrNull { it.type == ProviderType.EDGE_TTS }
+            }
+            if (edgeCfg != null) return edgeCfg.copy(voiceId = target)
+        }
+        return active
+    }
 
     private fun mapReaderScale(raw: Int, min: Float, max: Float): Float = when {
         raw <= 0 || raw == 10 || raw == 100 -> 1.0f

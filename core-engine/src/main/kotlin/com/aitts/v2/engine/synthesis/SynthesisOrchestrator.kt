@@ -157,10 +157,12 @@ class SynthesisOrchestrator(
         sessionId: String,
         sink: SynthesisSink
     ) {
+        val startMs = System.currentTimeMillis()
         val provider = registry.get(segCfg.type)
         if (input.settings.isAudioCacheEnabled) {
             diskCache.get(segCfg, seg.text)?.let { cached ->
                 pushBatch(SynthesizedAudio(cached, segCfg.sampleRate, isRawPcm = false), segCfg, input.settings, gain, 24000, sink)
+                SynthesisHelpers.recordHistory(input, "${segCfg.name} (缓存)", segCfg.voiceId, seg.text, startMs, fallback = false)
                 return
             }
         }
@@ -194,6 +196,7 @@ class SynthesisOrchestrator(
                 val wav = WavCodec.encodeToWav(rawFull, streamRes.getOrNull()?.sampleRate ?: 24000, 1)
                 diskCache.put(segCfg, seg.text, wav, input.settings.maxCacheSizeMb)
             }
+            SynthesisHelpers.recordHistory(input, "${segCfg.name} (流式)", segCfg.voiceId, seg.text, startMs, fallback = false)
             return
         }
 

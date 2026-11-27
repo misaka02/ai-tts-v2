@@ -66,6 +66,16 @@ class AppContainer(context: Context) {
             onPresetSelected = { preset ->
                 val cur = preferences.settingsFlow.value
                 preferences.updateSettings(cur.copy(floatingSubtitleNovelPreset = preset))
+            },
+            onClosedByUser = {
+                val cur = preferences.settingsFlow.value
+                if (cur.isFloatingSubtitleEnabled) {
+                    preferences.updateSettings(cur.copy(isFloatingSubtitleEnabled = false))
+                }
+            },
+            onPositionChanged = { y ->
+                val cur = preferences.settingsFlow.value
+                preferences.updateSettings(cur.copy(floatingSubtitleY = y))
             }
         )
     }

@@ -33,6 +33,20 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    private val _permissionState = MutableStateFlow(
+        AppPermissionState(
+            ignoringBatteryOptimizations = true,
+            notificationGranted = true,
+            overlayGranted = false,
+            isSystemDefaultTts = false
+        )
+    )
+    val permissionState: StateFlow<AppPermissionState> = _permissionState.asStateFlow()
+
+    fun refreshPermissions(context: Context) {
+        _permissionState.value = PermissionHelper.check(context)
+    }
+
     fun consumeMessage() {
         _message.value = null
     }

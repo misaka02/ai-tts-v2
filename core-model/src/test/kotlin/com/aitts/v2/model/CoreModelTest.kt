@@ -83,4 +83,12 @@ class CoreModelTest {
         )
         assertTrue(customNoSpeed.requiresClientSpeedScaling(isStreaming = false, capabilities = ProviderCapabilities()))
     }
+
+    @Test
+    fun `legacy GlobalSettings json without floatingSubtitleY defaults cleanly`() {
+        val legacyJson = """{"activeProviderId":"edge_tts_xiaoxiao","isFloatingSubtitleEnabled":true}"""
+        val decoded = json.decodeFromString<GlobalSettings>(legacyJson)
+        assertEquals(-1, decoded.floatingSubtitleY)
+        assertTrue(decoded.isFloatingSubtitleEnabled)
+    }
 }

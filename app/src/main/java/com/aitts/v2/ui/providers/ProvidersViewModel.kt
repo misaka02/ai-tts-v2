@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aitts.v2.di.AppContainer
-import com.aitts.v2.engine.audio.WavCodec
+import com.aitts.v2.engine.audio.AudioEnhancer
+import com.aitts.v2.engine.audio.SonicSpeedScaler
 import com.aitts.v2.engine.provider.ProviderSynthesisRequest
+import com.aitts.v2.model.AudioProcessingMode
 import com.aitts.v2.model.OfflineCatalogData
 import com.aitts.v2.model.OfflineModelSpec
 import com.aitts.v2.model.ProviderCredentials
@@ -13,6 +15,7 @@ import com.aitts.v2.model.ProviderType
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.model.VoiceModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -21,6 +24,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+enum class ProviderAction { SET_ACTIVE, PIN_TOP, MOVE_UP, MOVE_DOWN, DUPLICATE, DELETE }
 
 data class ProvidersUiState(
     val latenciesMs: Map<String, Long> = emptyMap(),
@@ -45,6 +50,8 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
     val settingsFlow = container.preferences.settingsFlow
     val offlineIncluded = container.offlineIncluded
 
+    private var singleTestJob: Job? = null
+
     init {
         refreshInstalledOfflineModels()
     }
@@ -61,11 +68,16 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { it.copy(downloadedModelIds = installed) }
     }
 
-    fun setActive(id: String) = container.preferences.setActiveProviderId(id)
-    fun move(id: String, delta: Int) = container.preferences.moveProvider(id, delta)
-    fun pinToTop(id: String) = container.preferences.pinProviderToTop(id)
-    fun duplicate(id: String) = container.preferences.duplicateProvider(id)
-    fun delete(id: String) = container.preferences.deleteProvider(id)
+    fun performAction(id: String, action: ProviderAction) {
+        when (action) {
+            ProviderAction.SET_ACTIVE -> container.preferences.setActiveProviderId(id)
+            ProviderAction.MOVE_UP -> container.preferences.moveProvider(id, -1)
+            ProviderAction.MOVE_DOWN -> container.preferences.moveProvider(id, 1)
+            ProviderAction.PIN_TOP -> container.preferences.pinProviderToTop(id)
+            ProviderAction.DUPLICATE -> container.preferences.duplicateProvider(id)
+            ProviderAction.DELETE -> container.preferences.deleteProvider(id)
+        }
+    }
 
     fun toggleEnabled(config: TtsProviderConfig, enabled: Boolean) {
         container.preferences.upsertProvider(config.copy(enabled = enabled))
@@ -138,8 +150,10 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun testAndPreview(config: TtsProviderConfig, credentials: ProviderCredentials) {
+        singleTestJob?.cancel()
+        container.previewPlayer.stop()
         _uiState.update { it.copy(isTestingSingle = true) }
-        viewModelScope.launch(Dispatchers.IO) {
+        singleTestJob = viewModelScope.launch(Dispatchers.IO) {
             val provider = container.providerRegistry.get(config.type)
             val res = provider.synthesize(
                 ProviderSynthesisRequest("你好，这是一段测试语音。", config.copy(isStreamingEnabled = false), credentials)
@@ -148,11 +162,12 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
                 onSuccess = { audio ->
                     val pcm = container.audioPipeline.decodeToStandardPcm(audio.bytes, audio.sampleRate, 24000)
                     pcm.fold(
-                        onSuccess = { pcmBytes ->
+                        onSuccess = { rawPcm ->
+                            val finalPcm = applyPreviewEffects(rawPcm, config, provider.capabilities)
                             container.previewPlayer.openStream(24000)
-                            container.previewPlayer.writeChunk(pcmBytes)
+                            container.previewPlayer.writeChunk(finalPcm)
                             container.previewPlayer.finishStream()
-                            _uiState.update { it.copy(isTestingSingle = false, message = "试听成功 (${pcmBytes.size} bytes)") }
+                            _uiState.update { it.copy(isTestingSingle = false, message = "试听完成 (${finalPcm.size} bytes)") }
                         },
                         onFailure = { e ->
                             _uiState.update { it.copy(isTestingSingle = false, message = "解码失败: ${e.message}") }
@@ -166,7 +181,36 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun stopPreview() = container.previewPlayer.stop()
+    private fun applyPreviewEffects(
+        rawPcm: ByteArray,
+        config: TtsProviderConfig,
+        caps: com.aitts.v2.model.ProviderCapabilities
+    ): ByteArray {
+        val scaled = if (config.requiresClientSpeedScaling(isStreaming = false, capabilities = caps)) {
+            val scaler = SonicSpeedScaler(24000, 1, config.speed)
+            scaler.processChunk(rawPcm) + scaler.flush()
+        } else {
+            rawPcm
+        }
+        val settings = settingsFlow.value
+        val mode = settings.audioProcessingMode
+        val gain = if (mode == AudioProcessingMode.CUSTOM) settings.loudnessGainFactor else mode.defaultGain
+        return AudioEnhancer().processPcm(
+            scaled,
+            1,
+            mode,
+            settings.voiceClarityBoostEnabled,
+            gain,
+            trimSilence = settings.trimDeadSilence
+        )
+    }
+
+    fun stopPreview() {
+        singleTestJob?.cancel()
+        singleTestJob = null
+        container.previewPlayer.stop()
+        _uiState.update { it.copy(isTestingSingle = false) }
+    }
 
     fun downloadOfflineModel(spec: OfflineModelSpec) {
         if (_uiState.value.downloadingModelId != null) return

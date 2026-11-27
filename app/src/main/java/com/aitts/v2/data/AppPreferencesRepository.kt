@@ -154,8 +154,13 @@ class AppPreferencesRepository(
     }
 
     fun deleteProvider(id: String) {
-        saveProviders(_providersFlow.value.filterNot { it.id == id })
+        val remaining = _providersFlow.value.filterNot { it.id == id }
+        saveProviders(remaining)
         secretStore.removeCredentials(id)
+        if (_settingsFlow.value.activeProviderId == id) {
+            val nextActive = remaining.firstOrNull { it.enabled }?.id ?: remaining.firstOrNull()?.id.orEmpty()
+            updateSettings(_settingsFlow.value.copy(activeProviderId = nextActive))
+        }
     }
 
     fun sortProvidersByLatency(latencyMap: Map<String, Long>) {

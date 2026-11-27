@@ -29,7 +29,9 @@ import com.aitts.v2.model.SubtitleNovelPreset
 class FloatingSubtitleOverlay(
     private val appContext: Context,
     private val settingsProvider: () -> GlobalSettings,
-    private val onPresetSelected: (SubtitleNovelPreset) -> Unit
+    private val onPresetSelected: (SubtitleNovelPreset) -> Unit,
+    private val onClosedByUser: () -> Unit = {},
+    private val onPositionChanged: (Int) -> Unit = {}
 ) {
     private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
     private val handler = Handler(Looper.getMainLooper())
@@ -150,6 +152,12 @@ class FloatingSubtitleOverlay(
         }
         val metrics = appContext.resources.displayMetrics
         val width = minOf((metrics.widthPixels * 0.94f).toInt(), metrics.widthPixels - dp(20f))
+        val defaultY = (metrics.heightPixels - dp(180f)).coerceAtLeast(dp(60f))
+        val initialY = if (settings.floatingSubtitleY >= 0) {
+            settings.floatingSubtitleY.coerceIn(dp(20f), (metrics.heightPixels - dp(60f)).coerceAtLeast(dp(60f)))
+        } else {
+            defaultY
+        }
         layoutParams = WindowManager.LayoutParams(
             width,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -159,7 +167,7 @@ class FloatingSubtitleOverlay(
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = ((metrics.widthPixels - width) / 2).coerceAtLeast(0)
-            y = (metrics.heightPixels - dp(180f)).coerceAtLeast(dp(60f))
+            y = initialY
         }
 
         val container = LinearLayout(appContext).apply {
@@ -187,6 +195,7 @@ class FloatingSubtitleOverlay(
             isAttachedProvider = { attached },
             settingsProvider = settingsProvider,
             onToggleExpand = { expanded = it },
+            onDragEnd = onPositionChanged,
             dpFn = ::dp
         )
         applySettings(settings)
@@ -229,6 +238,7 @@ class FloatingSubtitleOverlay(
             layoutParams = LinearLayout.LayoutParams(dp(34f), dp(34f)).apply { marginStart = dp(4f) }
             setOnClickListener {
                 hide()
+                onClosedByUser()
                 appContext.sendBroadcast(
                     Intent(PlaybackNotificationController.ACTION_TOGGLE_SUBTITLE)
                         .setPackage(appContext.packageName)

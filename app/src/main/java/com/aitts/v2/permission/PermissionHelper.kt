@@ -15,7 +15,8 @@ import androidx.core.content.ContextCompat
 data class AppPermissionState(
     val ignoringBatteryOptimizations: Boolean,
     val notificationGranted: Boolean,
-    val overlayGranted: Boolean
+    val overlayGranted: Boolean,
+    val isSystemDefaultTts: Boolean
 )
 
 object PermissionHelper {
@@ -29,10 +30,14 @@ object PermissionHelper {
         } else {
             true
         }
+        val defaultTts = runCatching {
+            Settings.Secure.getString(context.contentResolver, "tts_default_synth") == context.packageName
+        }.getOrDefault(false)
         return AppPermissionState(
             ignoringBatteryOptimizations = batteryOk,
             notificationGranted = notifOk,
-            overlayGranted = Settings.canDrawOverlays(context)
+            overlayGranted = Settings.canDrawOverlays(context),
+            isSystemDefaultTts = defaultTts
         )
     }
 
