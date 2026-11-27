@@ -33,7 +33,7 @@ class GoogleDriveClientTest {
             val url = client.buildAuthorizationUrl("cid-123", "http://127.0.0.1:43210/callback", pkce)
             assertTrue(url.contains("client_id=cid-123"))
             assertTrue(url.contains("code_challenge_method=S256"))
-            assertTrue(url.contains("drive.readonly"))
+            assertTrue(java.net.URLDecoder.decode(url, "UTF-8").contains(GoogleDriveClient.DRIVE_SCOPE))
 
             server.enqueue(
                 MockResponse().setResponseCode(200).setBody(

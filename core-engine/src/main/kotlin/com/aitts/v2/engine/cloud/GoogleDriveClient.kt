@@ -25,12 +25,12 @@ import java.util.Base64
  * so user HTTP/SOCKS proxy settings automatically apply to Drive requests.
  */
 class GoogleDriveClient(
-    private val httpManager: HttpClientManager,
+    internal val httpManager: HttpClientManager,
     private val authBaseUrl: String = DEFAULT_AUTH_URL,
     private val tokenUrl: String = DEFAULT_TOKEN_URL,
-    private val apiBaseUrl: String = DEFAULT_API_URL
+    internal val apiBaseUrl: String = DEFAULT_API_URL
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
+    internal val json = Json { ignoreUnknownKeys = true }
     private val random = SecureRandom()
 
     fun generatePkce(): PkcePair {
@@ -207,10 +207,11 @@ class GoogleDriveClient(
         }
     }
 
-    private suspend fun <T> executeAuthorized(
+    internal suspend fun <T> executeAuthorized(
         initialConfig: GoogleDriveAuthConfig,
         url: String,
         onTokenRefreshed: (GoogleDriveAuthConfig) -> Unit,
+        requestBuilder: (Request.Builder) -> Request.Builder = { it },
         handler: suspend (Response) -> T
     ): T {
         var active = initialConfig
@@ -223,7 +224,9 @@ class GoogleDriveClient(
         }
         if (active.accessToken.isBlank()) throw IOException("未连接 Google 网盘或 Access Token 无效")
 
-        val req1 = Request.Builder().url(url).header("Authorization", "Bearer ${active.accessToken}").build()
+        val req1 = requestBuilder(Request.Builder().url(url))
+            .header("Authorization", "Bearer ${active.accessToken}")
+            .build()
         httpManager.client.newCall(req1).execute().use { resp ->
             if (resp.code != 401 || active.refreshToken.isBlank() || active.clientId.isBlank()) {
                 return handler(resp)
@@ -231,7 +234,9 @@ class GoogleDriveClient(
         }
         val refreshed = refreshAccessToken(active).getOrThrow()
         onTokenRefreshed(refreshed)
-        val req2 = Request.Builder().url(url).header("Authorization", "Bearer ${refreshed.accessToken}").build()
+        val req2 = requestBuilder(Request.Builder().url(url))
+            .header("Authorization", "Bearer ${refreshed.accessToken}")
+            .build()
         httpManager.client.newCall(req2).execute().use { retryResp ->
             return handler(retryResp)
         }
@@ -313,7 +318,7 @@ class GoogleDriveClient(
         output.flush()
     }
 
-    private fun extractErrorMessage(body: String): String {
+    internal fun extractErrorMessage(body: String): String {
         return runCatching {
             val obj = json.parseToJsonElement(body).jsonObject
             obj["error_description"]?.jsonPrimitive?.content
@@ -326,7 +331,8 @@ class GoogleDriveClient(
         const val DEFAULT_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
         const val DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token"
         const val DEFAULT_API_URL = "https://www.googleapis.com"
-        private const val DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
-        private val DRIVE_ID_RE = Regex("^[a-zA-Z0-9._-]+$")
+        const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+        private const val DRIVE_READONLY_SCOPE = DRIVE_SCOPE
+        internal val DRIVE_ID_RE = Regex("^[a-zA-Z0-9._-]+$")
     }
 }

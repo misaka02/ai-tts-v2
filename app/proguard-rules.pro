@@ -27,6 +27,12 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+-keep class org.readium.** { *; }
+-dontwarn org.readium.**
+-keep class com.google.android.gms.auth.** { *; }
+-dontwarn com.google.android.gms.**
+-dontwarn org.jsoup.**
+
 # Optional codecs in commons-compress not used by OfflineModelInstaller (uses Tar + BZip2 only)
 -dontwarn org.brotli.**
 -dontwarn com.github.luben.zstd.**

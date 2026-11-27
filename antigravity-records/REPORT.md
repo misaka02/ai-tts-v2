@@ -3,19 +3,28 @@
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
 - **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
-- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；前序预发布 [v2.1.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1)、[v2.1.0-pre.2](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.2)、[v2.1.0-pre.3](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.3)、[v2.2.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.2.0-pre.1)；**最新预发布 [v2.2.0-pre.2](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.2.0-pre.2)**（Pre-release，根治电子书编码乱码、新增像素级横向真分页翻页与 Google Drive 网盘浏览导入，附带 `ai-tts-v2-cloud-v2.2.0-pre.2.apk` 与 `ai-tts-v2-full-arm64-v2.2.0-pre.2.apk`）。
+- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；已按用户要求清理所有历史旧 Pre-release，**唯一最新预发布 [v2.3.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.3.0-pre.1)**（Pre-release，Readium 3.0 工业级 EPUB 阅读器重构 + 统一文件管理器/专有同步目录/WebDAV/Google 网盘一键登录，附带 `ai-tts-v2-cloud-v2.3.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.3.0-pre.1.apk`）。
 - **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包 + 默认发布 GitHub Pre-release”规则。
-- **当前最新验证与产物（2026-11-27 v2.2.0-pre.2 乱码根治 + 真分页翻页 + Google Drive 版）**：
+- **当前最新验证与产物（2026-11-28 v2.3.0-pre.1 Readium 3.0 EPUB + 统一文件管理/同步版）**：
   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）
-  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 49s`，0 编译警告，`Detekt` 0 issues，`Lint` 0 errors，**49/49 单测全部通过**）
-  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **1,992,337 字节**（约 **1.90 MiB**，SHA-256 `066F3C253D213A844F1A97D06612457F021769D45E4FFD3A86CC5B25C4B2A3F4`，`apksigner` 校验通过）
-  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **25,666,419 字节**（约 **24.48 MiB**，SHA-256 `19990E0AEC4C09CC660FFE6A4E33953972E322908960C3061DB7D2584B9897B5`，`apksigner` 校验通过）
-  - **Qodo CLI 审查（v2.2.0-pre.2）**：已完成第 1 轮（`d40c9d8f-811b-49e0-a206-2512813d44bc`）与第 2 轮复核（`b378303a-82d3-4a0d-9744-2d0ffd10b18f`，确认第 1 轮全部 11 项引入问题 `resolved`），并修复第 2 轮全部 4 项新增建议（`ReadingProgress.charOffset` 长段页内恢复、断页空白保留、本地 OAuth 回调路径校验过滤、跨章回翻末页进度记录），达 2 轮硬上限后全量复验通过。
-- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**133 个 `.kt` 文件，共 20,188 行**（另含 `Sonic.java`）
+  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 35s`，`Detekt` 0 issues，`Lint` 0 errors，**53/53 单测全部通过**）
+  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **6,484,476 字节**（约 **6.18 MiB**，SHA-256 `7F5EC09B3C0050DFC0902FFCBCFACA3C1B8ECC1CBE42DC0E121D2F5729832214`，`apksigner` 校验通过）
+  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **30,175,478 字节**（约 **28.78 MiB**，SHA-256 `E6C542D13635663A1143D522B3051743D45BF75BB8849BE2CD3F06679D306995`，`apksigner` 校验通过）
+  - **Android `pixel_34` 实机模拟器截图验收**（`0` 应用/Readium 崩溃）：
+    - [01_bookshelf.png](screenshots/v2.3.0-pre.1/01_bookshelf.png)（三本书籍同步进书架）
+    - [02_epub2_readium.png](screenshots/v2.3.0-pre.1/02_epub2_readium.png)（EPUB 2 `DOCTYPE` 中文 CSS 与插图）
+    - [03a_reader_chrome.png](screenshots/v2.3.0-pre.1/03a_reader_chrome.png)（阅读器顶栏与底部进度滑块/功能栏）
+    - [03b_reader_toc_sheet.png](screenshots/v2.3.0-pre.1/03b_reader_toc_sheet.png)（目录/书签/划线笔记三页签抽屉）
+    - [04_epub3_ruby.png](screenshots/v2.3.0-pre.1/04_epub3_ruby.png)（EPUB 3 假名 `<ruby>` 注音精排）
+    - [05_gbk_txt_paged.png](screenshots/v2.3.0-pre.1/05_gbk_txt_paged.png)（GB18030 TXT 横向真分页无乱码）
+    - [06a_file_local.png](screenshots/v2.3.0-pre.1/06a_file_local.png)（本地专有同步目录文件管理器）
+    - [06b_file_gdrive.png](screenshots/v2.3.0-pre.1/06b_file_gdrive.png)（Google 网盘 Play Services 一键登录 + SAF 直选）
+  - **Qodo CLI 审查（v2.3.0-pre.1）**：已完成第 1 轮（`b5807904-bd52-4dc8-9896-d414ffd444c1` / `review_id: 2f4732e2-073a-445b-bc28-1b2caf955227`）与第 2 轮复核（`4c65a39b-e0fb-456c-8c9a-5db5fe69b149` / `review_id: 22947f4b-edff-446b-86db-5b708466e369`，确认第 1 轮 12 项直接 `resolved`，修复其余全部问题及第 2 轮 4 项新增边界缺陷），达 2 轮硬上限后全量复验通过。
+- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**152 个 `.kt` 文件，共 23,288 行**（另含 `Sonic.java`）
   - `:core-model/src`：14 个文件，1,416 行
-  - `:core-engine/src`：42 个文件，5,587 行（另含 `Sonic.java`）
-  - `:core-reader/src`：13 个文件，2,150 行
-  - `:app/src`（`main` + `cloud` + `full` + `test`）：64 个文件，11,035 行
+  - `:core-engine/src`：46 个文件，6,190 行（另含 `Sonic.java`）
+  - `:core-reader/src`：13 个文件，2,275 行
+  - `:app/src`（`main` + `cloud` + `full` + `test`）：79 个文件，13,407 行
 
 ## 2. 架构与核心改进对照
 
@@ -66,5 +75,7 @@
 - [ ] 悬浮字幕的覆盖层权限引导、纸张主题切换、拖拽位置持久化与锁定穿透手势。
 - [ ] `full` 变体中 Sherpa-ONNX 离线包下载解压（`.tar.bz2` / `.zip`）及离线发音人加载合成。
 - [ ] 配置备份导出（不含敏感凭证与含凭证选项）及口令导入兼容性。
-- [ ] **内置阅读器实机专项核验**：SAF 与文件管理器 `ACTION_VIEW` 导入超长 GBK/UTF-16 TXT、EPUB 2/3（含封面、插图、假名注音 `<ruby>`）、Markdown 与 HTML；验证 `PAGED` 横向翻页（左右滑/三区点击/音量键/跨章回翻末页/长段落续页进度恢复）、长按段落直接起读、听书高亮自动翻页、`自动连播下一章` 及跨章节后台播放尾音排空效果（`GoogleDriveClient` 与阅读器分页仅在 JVM MockWebServer 与单元测试中覆盖，尚未在真机/模拟器或真实 Google Drive OAuth 环境下进行交互联调）。
-- [ ] **Google Drive 网盘实机专项核验**：填写真实 Google Cloud OAuth Desktop Client ID 后进行浏览器环回授权（含 `/callback` 重定向与代理通道）、Token 直连浏览/搜索及在线电子书下载导入。
+- [x] **内置阅读器与文件同步中心 emulator `pixel_34` 实机专项核验（已完成基础渲染与本地同步全链路）**：已在 `pixel_34` 安装 `app-cloud-release.apk` 并实机截图查验 `BooksSync` 同步导入、EPUB 2 `DOCTYPE` 中文 CSS/插图、EPUB 3 `<ruby>` 注音精排、GB18030 TXT 分页阅读及统一文件/网盘界面；WebDAV `PROPFIND`/`PUT`/`GET`、URL 编码与防路径穿越已在 `MockWebServer` 覆盖。
+- [ ] **真机专项待在个人真实账号环境下补充**：
+  - 在已登录 Google 账号且在 Google Cloud Console 绑定当前签名 SHA-1 (`95:96:54:25:F7:DC:C2:7B:0C:99:1D:94:68:DF:AB:BD:20:B0:97:A5`) 的真机上完成 Play Services `Identity.getAuthorizationClient` 一键同意与双向同步真机联调（或通过系统“网盘直选 SAF”零配置导入）。
+  - 在个人 Nextcloud / Alist / 坚果云真实 WebDAV 服务端下完成双设备 `aitts_library_state.json` 跨设备进度/划线实时联调。

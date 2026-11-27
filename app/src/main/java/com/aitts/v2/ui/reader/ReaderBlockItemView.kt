@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -35,10 +36,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.aitts.v2.reader.model.ReaderBlock
 import com.aitts.v2.reader.model.ReaderSettings
+import com.aitts.v2.reader.model.ReaderTextAlign
 
 /**
  * Shared block renderer used identically by both horizontal paged and vertical scroll viewports.
@@ -54,9 +58,11 @@ fun ReaderBlockItemView(
     maxImageHeightDp: Int,
     onTap: (fractionX: Float) -> Unit,
     onLongPress: () -> Unit,
-    loadImage: suspend (String) -> Bitmap?
+    loadImage: suspend (String) -> Bitmap?,
+    onImageClick: (Bitmap) -> Unit = {}
 ) {
     val activeBg = if (isActive) colors.highlightBg else Color.Transparent
+    val align = if (settings.textAlign == ReaderTextAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start
     val rowModifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(8.dp))
@@ -106,6 +112,8 @@ fun ReaderBlockItemView(
                     fontStyle = if (block.isQuote) FontStyle.Italic else FontStyle.Normal,
                     fontSize = settings.fontSizeSp.sp,
                     lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+                    letterSpacing = settings.letterSpacingEm.em,
+                    textAlign = align,
                     color = if (block.isQuote) colors.secondaryText else colors.text,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -130,6 +138,7 @@ fun ReaderBlockItemView(
                                 .fillMaxWidth()
                                 .heightIn(max = maxImageHeightDp.dp)
                                 .clip(RoundedCornerShape(8.dp))
+                                .clickable { onImageClick(loaded) }
                         )
                     }
                     if (block.altText.isNotBlank()) {
@@ -142,6 +151,25 @@ fun ReaderBlockItemView(
             modifier = Modifier.padding(vertical = 6.dp),
             color = colors.secondaryText.copy(alpha = 0.28f)
         )
+    }
+}
+
+@Composable
+fun rememberResolvedReaderFontFamily(settings: ReaderSettings): FontFamily {
+    val path = settings.customFontPath
+    return remember(path, settings.fontFamily) {
+        if (path.isNotBlank()) {
+            runCatching {
+                val file = java.io.File(path)
+                if (file.exists()) FontFamily(android.graphics.Typeface.createFromFile(file)) else null
+            }.getOrNull()
+        } else {
+            null
+        } ?: if (settings.fontFamily == com.aitts.v2.reader.model.ReaderFontFamily.SERIF) {
+            FontFamily.Serif
+        } else {
+            FontFamily.SansSerif
+        }
     }
 }
 

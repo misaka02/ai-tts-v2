@@ -1,12 +1,19 @@
 package com.aitts.v2.reader
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import com.aitts.v2.data.SecretStore
+import com.aitts.v2.engine.cloud.CloudFileNode
 import com.aitts.v2.engine.cloud.DriveFileItem
-import com.aitts.v2.engine.cloud.DriveFilePage
 import com.aitts.v2.engine.cloud.GoogleDriveAuthConfig
 import com.aitts.v2.engine.cloud.GoogleDriveClient
+import com.aitts.v2.engine.cloud.GoogleDriveWriteOps
 import com.aitts.v2.reader.model.BookRecord
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
+import com.google.android.gms.tasks.Tasks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,19 +21,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
-import java.io.InputStreamReader
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.URLDecoder
+import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.TimeUnit
 
 /**
- * Coordinates encrypted Google Drive credential persistence, loopback PKCE OAuth,
- * directory browsing, and streaming download-to-bookshelf import.
+ * Manages encrypted Google Drive credentials, One-Tap Google Play Services auth,
+ * fallback developer OAuth/Token connection, and full file-manager operations.
  */
 class GoogleDriveRepository(
     context: Context,
@@ -37,151 +40,157 @@ class GoogleDriveRepository(
     private val appContext = context.applicationContext
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val configLock = Any()
-
-    @Volatile
-    private var activeAuthSocket: ServerSocket? = null
-    private val authGeneration = AtomicLong(0L)
+    private val writeOps = GoogleDriveWriteOps(driveClient)
+    private val loopbackAuth = GoogleDriveLoopbackAuth(driveClient)
 
     private val _authFlow = MutableStateFlow(loadConfigFromStore())
     val authFlow: StateFlow<GoogleDriveAuthConfig> = _authFlow.asStateFlow()
+
+    fun buildPlayServicesAuthRequest(): AuthorizationRequest =
+        AuthorizationRequest.Builder()
+            .setRequestedScopes(listOf(Scope(GoogleDriveClient.DRIVE_SCOPE)))
+            .build()
+
+    suspend fun handlePlayServicesToken(accessToken: String): Result<GoogleDriveAuthConfig> {
+        val token = accessToken.trim()
+        if (token.isEmpty()) return Result.failure(IOException("Google 授权未返回有效 Access Token"))
+        val about = driveClient.fetchUserAbout(token).getOrElse { return Result.failure(it) }
+        val cfg = GoogleDriveAuthConfig(
+            accessToken = token,
+            expiresAtEpochMs = System.currentTimeMillis() + 50 * 60_000L,
+            accountName = about.first,
+            accountEmail = about.second
+        )
+        return runCatching { saveConfig(cfg); cfg }
+    }
 
     suspend fun authorizeInBrowser(
         clientId: String,
         clientSecret: String,
         onLaunchUrl: (String) -> Unit
-    ): Result<GoogleDriveAuthConfig> = withContext(Dispatchers.IO) {
-        val cleanClientId = clientId.trim()
-        if (cleanClientId.isEmpty()) {
-            return@withContext Result.failure(IOException("请先填写 Google OAuth Client ID"))
-        }
-        cancelPendingAuth()
-        val generation = authGeneration.incrementAndGet()
-        val pkce = driveClient.generatePkce()
-        var server: ServerSocket? = null
-        try {
-            server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).apply {
-                soTimeout = AUTH_TIMEOUT_MS
-            }
-            activeAuthSocket = server
-            val redirectUri = "http://127.0.0.1:${server.localPort}/callback"
-            val authUrl = driveClient.buildAuthorizationUrl(cleanClientId, redirectUri, pkce)
-            withContext(Dispatchers.Main) { onLaunchUrl(authUrl) }
+    ): Result<GoogleDriveAuthConfig> =
+        loopbackAuth.authorizeInBrowser(clientId, clientSecret, onLaunchUrl, ::saveConfig)
 
-            val queryParams = awaitLoopbackCallback(server)
-            if (generation != authGeneration.get()) throw IOException("登录请求已取消")
-            val err = queryParams["error"]
-            if (!err.isNullOrBlank()) throw IOException("Google 拒绝授权: $err")
-            if (queryParams["state"] != pkce.state) throw IOException("OAuth 状态校验失败，请重试")
-            val code = queryParams["code"]?.takeIf { it.isNotBlank() }
-                ?: throw IOException("未收到授权码 code")
+    fun cancelPendingAuth() = loopbackAuth.cancelPending()
 
-            val exchanged = driveClient.exchangeAuthCode(
-                clientId = cleanClientId,
-                clientSecret = clientSecret.trim(),
-                code = code,
-                codeVerifier = pkce.codeVerifier,
-                redirectUri = redirectUri
-            ).getOrThrow()
-            if (generation != authGeneration.get()) throw IOException("登录请求已取消")
-            saveConfig(exchanged)
-            Result.success(exchanged)
-        } catch (t: Throwable) {
-            Result.failure(t)
-        } finally {
-            if (activeAuthSocket === server) activeAuthSocket = null
-            runCatching { server?.close() }
-        }
-    }
-
-    fun cancelPendingAuth() {
-        authGeneration.incrementAndGet()
-        val socket = activeAuthSocket
-        activeAuthSocket = null
-        runCatching { socket?.close() }
-    }
-
-    suspend fun connectDirect(
+    suspend fun connectWithTokens(
         clientId: String,
         clientSecret: String,
         refreshToken: String,
         accessToken: String
     ): Result<GoogleDriveAuthConfig> = withContext(Dispatchers.IO) {
-        runCatching {
-            val cleanAccess = accessToken.trim()
-            val cleanRefresh = refreshToken.trim()
-            val cleanId = clientId.trim()
-            val cleanSecret = clientSecret.trim()
-
-            val verified = if (cleanRefresh.isNotEmpty() && cleanId.isNotEmpty()) {
-                val seed = GoogleDriveAuthConfig(
-                    clientId = cleanId,
-                    clientSecret = cleanSecret,
-                    refreshToken = cleanRefresh
-                )
-                driveClient.refreshAccessToken(seed).getOrThrow()
-            } else if (cleanAccess.isNotEmpty()) {
-                val (name, email) = driveClient.fetchUserAbout(cleanAccess).getOrThrow()
-                GoogleDriveAuthConfig(
-                    clientId = cleanId,
-                    clientSecret = cleanSecret,
-                    accessToken = cleanAccess,
-                    refreshToken = cleanRefresh,
-                    accountName = name,
-                    accountEmail = email
-                )
-            } else {
-                throw IOException("请提供有效的 Access Token 或 (Client ID + Refresh Token)")
+        val cleanAccess = accessToken.trim()
+        val cleanRefresh = refreshToken.trim()
+        val cleanClientId = clientId.trim()
+        val cleanSecret = clientSecret.trim()
+        val initial = GoogleDriveAuthConfig(cleanClientId, cleanSecret, cleanAccess, cleanRefresh)
+        val verified = when {
+            cleanRefresh.isNotBlank() && cleanClientId.isNotBlank() ->
+                driveClient.refreshAccessToken(initial).getOrElse { return@withContext Result.failure(it) }
+            cleanAccess.isNotBlank() -> {
+                val about = driveClient.fetchUserAbout(cleanAccess).getOrElse { return@withContext Result.failure(it) }
+                initial.copy(accountName = about.first, accountEmail = about.second)
             }
-            saveConfig(verified)
-            verified
+            else -> return@withContext Result.failure(IOException("请提供有效的 Token"))
         }
+        runCatching { saveConfig(verified); verified }
     }
 
     fun disconnect() {
-        cancelPendingAuth()
+        loopbackAuth.cancelPending()
         synchronized(configLock) {
-            secretStore.saveSecretString(SECRET_KEY, "")
+            secretStore.removeSecret(SECRET_KEY)
             _authFlow.value = GoogleDriveAuthConfig()
         }
     }
 
-    suspend fun listFiles(
-        folderId: String,
-        searchQuery: String,
-        ebooksOnly: Boolean,
-        pageToken: String? = null
-    ): Result<DriveFilePage> {
-        return driveClient.listFiles(
-            config = _authFlow.value,
-            folderId = folderId,
-            searchQuery = searchQuery,
-            ebooksOnly = ebooksOnly,
-            pageToken = pageToken,
-            onTokenRefreshed = { saveConfig(it) }
-        )
+    suspend fun listNodes(folderId: String, searchQuery: String, ebooksOnly: Boolean): Result<List<CloudFileNode>> =
+        withDriveRetry { cfg ->
+            runCatching {
+                val all = mutableListOf<CloudFileNode>()
+                var token: String? = null
+                var pages = 0
+                do {
+                    val page = driveClient.listFiles(
+                        config = cfg,
+                        folderId = folderId,
+                        searchQuery = searchQuery,
+                        ebooksOnly = ebooksOnly,
+                        pageToken = token,
+                        onTokenRefreshed = { saveConfig(it) }
+                    ).getOrThrow()
+                    all.addAll(page.items.map { it.toCloudNode() })
+                    token = page.nextPageToken?.takeIf { it.isNotBlank() }
+                    pages++
+                } while (token != null && pages < 20)
+                all
+            }
+        }
+
+    suspend fun createFolder(parentId: String, name: String): Result<DriveFileItem> =
+        withDriveRetry { cfg -> writeOps.createFolder(cfg, parentId, name) { saveConfig(it) } }
+
+    suspend fun renameItem(fileId: String, newName: String): Result<DriveFileItem> =
+        withDriveRetry { cfg -> writeOps.renameFile(cfg, fileId, newName) { saveConfig(it) } }
+
+    suspend fun deleteItem(fileId: String): Result<Unit> =
+        withDriveRetry { cfg -> writeOps.trashFile(cfg, fileId) { saveConfig(it) } }
+
+    suspend fun uploadFile(
+        parentId: String,
+        file: File,
+        existingId: String? = null,
+        remoteName: String = file.name
+    ): Result<DriveFileItem> = withDriveRetry { cfg ->
+        writeOps.uploadFile(cfg, parentId, remoteName, mimeForName(remoteName), file, existingId) { saveConfig(it) }
     }
 
+    suspend fun downloadToFile(fileId: String, destFile: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Result<File> =
+        withDriveRetry { cfg -> driveClient.downloadFile(cfg, fileId, destFile, onProgress = onProgress) { saveConfig(it) } }
+
+    private suspend fun <T> withDriveRetry(block: suspend (GoogleDriveAuthConfig) -> Result<T>): Result<T> {
+        var cfg = _authFlow.value
+        val isPlayServices = cfg.clientId.isBlank() && cfg.refreshToken.isBlank() && cfg.accessToken.isNotBlank()
+        val expiringSoon = cfg.expiresAtEpochMs > 0L && System.currentTimeMillis() + 60_000L >= cfg.expiresAtEpochMs
+        if (isPlayServices && expiringSoon) {
+            cfg = refreshPlayServicesSilent(cfg).getOrElse { return Result.failure(it) }
+        }
+        val first = block(cfg)
+        if (first.isSuccess || !isPlayServices) return first
+        val errMsg = first.exceptionOrNull()?.message.orEmpty()
+        val authErr = errMsg.contains("401") || errMsg.contains("Unauthorized", true) || errMsg.contains("登录")
+        if (!authErr) return first
+        val refreshed = refreshPlayServicesSilent(cfg).getOrElse { return Result.failure(it) }
+        return block(refreshed)
+    }
+
+    private suspend fun refreshPlayServicesSilent(previous: GoogleDriveAuthConfig): Result<GoogleDriveAuthConfig> =
+        withContext(Dispatchers.IO) {
+            val res = runCatching {
+                Tasks.await(Identity.getAuthorizationClient(appContext).authorize(buildPlayServicesAuthRequest()), 20L, TimeUnit.SECONDS)
+            }.getOrNull()
+            val nextToken = res?.takeIf { !it.hasResolution() }?.accessToken?.trim().orEmpty()
+            if (nextToken.isBlank()) {
+                disconnect()
+                return@withContext Result.failure(IOException("Google 授权已过期，请重新点击「一键授权登录」"))
+            }
+            val updated = previous.copy(accessToken = nextToken, expiresAtEpochMs = System.currentTimeMillis() + 50 * 60_000L)
+            runCatching { saveConfig(updated); updated }
+        }
+
     suspend fun downloadAndImport(
-        item: DriveFileItem,
+        item: CloudFileNode,
         onProgress: (Float) -> Unit
     ): Result<BookRecord> = withContext(Dispatchers.IO) {
         val dlDir = File(appContext.cacheDir, "drive_dl").apply { mkdirs() }
         val tmpFile = File(dlDir, "${UUID.randomUUID().toString().take(8)}_${item.name.take(32).replace(Regex("[^a-zA-Z0-9._-]"), "_")}")
         try {
-            driveClient.downloadFile(
-                config = _authFlow.value,
-                fileId = item.id,
-                outputFile = tmpFile,
-                onProgress = { done, total ->
-                    val knownTotal = if (total > 0L) total else item.sizeBytes
-                    if (knownTotal > 0L) {
-                        onProgress((done.toFloat() / knownTotal).coerceIn(0f, 1f))
-                    }
-                },
-                onTokenRefreshed = { saveConfig(it) }
-            ).getOrThrow()
+            downloadToFile(item.id, tmpFile) { done, total ->
+                val knownTotal = if (total > 0L) total else item.sizeBytes
+                if (knownTotal > 0L) onProgress((done.toFloat() / knownTotal).coerceIn(0f, 1f))
+            }.getOrThrow()
             tmpFile.inputStream().use { stream ->
-                bookImportManager.importFromStream(item.name, stream).getOrThrow()
+                bookImportManager.importFromStream(item.name, stream, sourceSyncKey = "gdrive:${item.id}").getOrThrow()
             }.let { Result.success(it) }
         } catch (t: Throwable) {
             Result.failure(t)
@@ -190,76 +199,49 @@ class GoogleDriveRepository(
         }
     }
 
-    private fun awaitLoopbackCallback(server: ServerSocket): Map<String, String> {
-        val deadlineMs = System.currentTimeMillis() + AUTH_TIMEOUT_MS
-        while (true) {
-            val remaining = (deadlineMs - System.currentTimeMillis()).toInt()
-            if (remaining <= 0) throw java.net.SocketTimeoutException("Google 授权回调等待超时")
-            server.soTimeout = remaining
-            server.accept().use { client ->
-                client.soTimeout = CALLBACK_READ_TIMEOUT_MS
-                val requestLine = runCatching {
-                    BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8)).readLine()
-                }.getOrNull().orEmpty()
-                val pathPart = requestLine.split(' ').getOrNull(1).orEmpty()
-                val params = parseQueryParams(pathPart.substringAfter('?', ""))
-                val hasAuthResult = params.containsKey("state") && (params.containsKey("code") || params.containsKey("error"))
-                if (pathPart.substringBefore('?') != "/callback" || !hasAuthResult) {
-                    runCatching { writeLoopbackResponse(client, "404 Not Found", "<h3>Ignored</h3>") }
-                    return@use
-                }
-                writeLoopbackResponse(
-                    client,
-                    "200 OK",
-                    "<h3>授权完成</h3><p>已成功连接 Google Drive，请切回 AI-TTS 查看授权状态。</p>"
-                )
-                return params
-            }
-        }
-    }
+    @Suppress("DEPRECATION")
+    fun getSigningSha1(): String = runCatching {
+        val pm = appContext.packageManager
+        val sig = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageInfo(appContext.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo.apkContentsSigners.firstOrNull()
+        } else {
+            pm.getPackageInfo(appContext.packageName, PackageManager.GET_SIGNATURES).signatures.firstOrNull()
+        } ?: return@runCatching "未知"
+        MessageDigest.getInstance("SHA-1").digest(sig.toByteArray()).joinToString(":") { "%02X".format(it) }
+    }.getOrDefault("未知")
 
-    private fun parseQueryParams(query: String): Map<String, String> {
-        if (query.isBlank()) return emptyMap()
-        return query.split('&').mapNotNull { pair ->
-            val idx = pair.indexOf('=')
-            if (idx <= 0) return@mapNotNull null
-            val k = URLDecoder.decode(pair.substring(0, idx), Charsets.UTF_8.name())
-            val v = URLDecoder.decode(pair.substring(idx + 1), Charsets.UTF_8.name())
-            k to v
-        }.toMap()
-    }
+    private fun DriveFileItem.toCloudNode() = CloudFileNode(
+        id = id,
+        name = name,
+        path = id,
+        isFolder = isFolder,
+        sizeBytes = sizeBytes,
+        mimeType = mimeType
+    )
 
-    private fun writeLoopbackResponse(client: java.net.Socket, status: String, bodyHtml: String) {
-        val html = """
-            <html><head><meta charset="utf-8"><title>AI-TTS</title></head>
-            <body style="font-family:sans-serif;padding:24px;">$bodyHtml</body></html>
-        """.trimIndent().toByteArray(Charsets.UTF_8)
-        val header = "HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\n" +
-            "Content-Length: ${html.size}\r\nConnection: close\r\n\r\n"
-        client.getOutputStream().apply {
-            write(header.toByteArray(Charsets.US_ASCII))
-            write(html)
-            flush()
-        }
+    private fun mimeForName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+        "epub" -> "application/epub+zip"
+        "json" -> "application/json"
+        "md", "markdown" -> "text/markdown"
+        "html", "htm" -> "text/html"
+        else -> "text/plain"
     }
 
     private fun saveConfig(config: GoogleDriveAuthConfig) {
         synchronized(configLock) {
             val saved = secretStore.saveSecretString(SECRET_KEY, json.encodeToString(config))
-            if (!saved) throw IOException("无法将 Google 网盘凭据加密写入设备存储")
+            if (!saved) throw IOException("无法加密保存 Google 网盘凭据")
             _authFlow.value = config
         }
     }
 
     private fun loadConfigFromStore(): GoogleDriveAuthConfig {
         val raw = secretStore.getSecretString(SECRET_KEY) ?: return GoogleDriveAuthConfig()
-        return runCatching { json.decodeFromString<GoogleDriveAuthConfig>(raw) }
-            .getOrDefault(GoogleDriveAuthConfig())
+        return runCatching { json.decodeFromString<GoogleDriveAuthConfig>(raw) }.getOrDefault(GoogleDriveAuthConfig())
     }
 
     companion object {
         private const val SECRET_KEY = "google_drive_auth_v1"
-        private const val AUTH_TIMEOUT_MS = 180_000
-        private const val CALLBACK_READ_TIMEOUT_MS = 10_000
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -36,7 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -44,7 +45,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,9 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aitts.v2.reader.model.BookBookmark
-import com.aitts.v2.reader.model.BookSearchHit
+import com.aitts.v2.reader.model.BookHighlight
 import com.aitts.v2.reader.model.ChapterRef
-import com.aitts.v2.ui.theme.InkPaperCard
 
 @Composable
 fun ReaderTopBar(
@@ -80,12 +82,7 @@ fun ReaderTopBar(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回书架")
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = bookTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Text(bookTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         text = chapterTitle,
                         style = MaterialTheme.typography.bodySmall,
@@ -114,34 +111,59 @@ fun ReaderTopBar(
 fun ReaderBottomBar(
     chapterIndex: Int,
     totalChapters: Int,
+    bookProgression: Float,
     isPlaying: Boolean,
     isSynthesizing: Boolean,
     chromeBg: Color,
     chromeText: Color,
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
+    onSeekProgression: (Float) -> Unit,
     onTogglePlay: () -> Unit,
     onOpenToc: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenTtsSheet: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var dragging by remember { mutableStateOf(false) }
+    var dragFraction by remember(bookProgression) { mutableFloatStateOf(bookProgression.coerceIn(0f, 1f)) }
+    val displayFraction = if (dragging) dragFraction else bookProgression.coerceIn(0f, 1f)
+    val previewChapter = ((displayFraction * totalChapters.coerceAtLeast(1)).toInt() + 1)
+        .coerceIn(1, totalChapters.coerceAtLeast(1))
+
     Surface(color = chromeBg, contentColor = chromeText, tonalElevation = 3.dp, modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
             HorizontalDivider(color = chromeText.copy(alpha = 0.14f))
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onPrevChapter, enabled = chapterIndex > 0) {
                     Icon(Icons.Outlined.SkipPrevious, contentDescription = "上一章")
                 }
-                Text(
-                    text = "第 ${chapterIndex + 1} / ${totalChapters.coerceAtLeast(1)} 章",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = chromeText.copy(alpha = 0.8f)
-                )
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = if (dragging) {
+                            "跳转至第 $previewChapter / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
+                        } else {
+                            "第 ${chapterIndex + 1} / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = chromeText.copy(alpha = 0.8f)
+                    )
+                    Slider(
+                        value = displayFraction,
+                        onValueChange = {
+                            dragging = true
+                            dragFraction = it
+                        },
+                        onValueChangeFinished = {
+                            dragging = false
+                            onSeekProgression(dragFraction)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(28.dp)
+                    )
+                }
                 IconButton(onClick = onNextChapter, enabled = chapterIndex + 1 < totalChapters) {
                     Icon(Icons.Outlined.SkipNext, contentDescription = "下一章")
                 }
@@ -152,10 +174,10 @@ fun ReaderBottomBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 IconButton(onClick = onOpenToc) {
-                    Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = "目录与书签")
+                    Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = "目录、书签与笔记")
                 }
                 IconButton(onClick = onOpenAppearance) {
-                    Icon(Icons.Outlined.FormatSize, contentDescription = "排版设置")
+                    Icon(Icons.Outlined.FormatSize, contentDescription = "排版与亮度")
                 }
                 Button(onClick = onTogglePlay, modifier = Modifier.weight(1f)) {
                     when {
@@ -190,34 +212,41 @@ fun ReaderTocSheet(
     chapters: List<ChapterRef>,
     currentChapterIndex: Int,
     bookmarks: List<BookBookmark>,
+    highlights: List<BookHighlight>,
     onSelectChapter: (Int) -> Unit,
     onSelectBookmark: (BookBookmark) -> Unit,
     onRemoveBookmark: (String) -> Unit,
+    onSelectHighlight: (BookHighlight) -> Unit,
+    onEditHighlightNote: (BookHighlight) -> Unit,
+    onRemoveHighlight: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tocListState = rememberLazyListState()
     LaunchedEffect(selectedTab, currentChapterIndex) {
-        if (selectedTab == 0 && currentChapterIndex in chapters.indices) {
-            tocListState.scrollToItem(currentChapterIndex)
+        val activePos = chapters.indexOfFirst { it.index == currentChapterIndex }
+        if (selectedTab == 0 && activePos >= 0) {
+            tocListState.scrollToItem(activePos)
         }
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.background) {
-        Column(modifier = Modifier.fillMaxWidth().height(460.dp).navigationBarsPadding()) {
+        Column(modifier = Modifier.fillMaxWidth().height(480.dp).navigationBarsPadding()) {
             TabRow(selectedTabIndex = selectedTab) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("目录 (${chapters.size})") })
                 Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("书签 (${bookmarks.size})") })
+                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("笔记 (${highlights.size})") })
             }
-            if (selectedTab == 0) {
-                LazyColumn(state = tocListState, modifier = Modifier.fillMaxWidth().weight(1f)) {
-                    items(chapters, key = { it.index }) { chap ->
+            when (selectedTab) {
+                0 -> LazyColumn(state = tocListState, modifier = Modifier.fillMaxWidth().weight(1f)) {
+                    itemsIndexed(chapters, key = { pos, chap -> "${pos}_${chap.index}_${chap.title}" }) { pos, chap ->
                         val active = chap.index == currentChapterIndex
+                        val indentDp = (16 + chap.depth.coerceIn(0, 4) * 16).dp
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onSelectChapter(chap.index) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                .clickable { onSelectChapter(pos) }
+                                .padding(start = indentDp, end = 16.dp, top = 12.dp, bottom = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
@@ -232,88 +261,52 @@ fun ReaderTocSheet(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     }
                 }
-            } else {
-                if (bookmarks.isEmpty()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("暂无书签，点击顶栏书签图标即可收藏当前阅读位置。", style = MaterialTheme.typography.bodyMedium)
-                    }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                        items(bookmarks, key = { it.id }) { mark ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onSelectBookmark(mark) }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        mark.chapterTitle,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        mark.snippet,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                IconButton(onClick = { onRemoveBookmark(mark.id) }) {
-                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除书签")
-                                }
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        }
-                    }
-                }
+                1 -> BookmarkListTab(
+                    bookmarks = bookmarks,
+                    onSelect = onSelectBookmark,
+                    onRemove = onRemoveBookmark,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
+                else -> HighlightListTab(
+                    highlights = highlights,
+                    onSelect = onSelectHighlight,
+                    onEditNote = onEditHighlightNote,
+                    onRemove = onRemoveHighlight,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderSearchSheet(
-    query: String,
-    hits: List<BookSearchHit>,
-    isSearching: Boolean,
-    onQueryChange: (String) -> Unit,
-    onSelectHit: (BookSearchHit) -> Unit,
-    onDismiss: () -> Unit
+private fun BookmarkListTab(
+    bookmarks: List<BookBookmark>,
+    onSelect: (BookBookmark) -> Unit,
+    onRemove: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier.fillMaxWidth().height(460.dp).padding(horizontal = 16.dp).navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("全书检索", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                placeholder = { Text("输入至少 2 个字开始搜索") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            if (isSearching) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("正在检索全书内容...", style = MaterialTheme.typography.bodySmall)
+    if (bookmarks.isEmpty()) {
+        Column(modifier = modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("暂无书签，点击顶栏书签图标即可收藏当前阅读位置。", style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
+    LazyColumn(modifier = modifier) {
+        items(bookmarks, key = { it.id }) { mark ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onSelect(mark) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(mark.chapterTitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(mark.snippet, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { onRemove(mark.id) }) {
+                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除书签")
                 }
             }
-            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(hits) { hit ->
-                    InkPaperCard(padding = 12.dp, onClick = { onSelectHit(hit) }) {
-                        Text(hit.chapterTitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        Text(hit.snippet, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
     }
 }

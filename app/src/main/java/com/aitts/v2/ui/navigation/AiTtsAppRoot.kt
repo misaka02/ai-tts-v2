@@ -52,8 +52,8 @@ import com.aitts.v2.ui.providers.ProvidersScreen
 import com.aitts.v2.ui.providers.ProvidersViewModel
 import com.aitts.v2.ui.reader.BookshelfScreen
 import com.aitts.v2.ui.reader.BookshelfViewModel
-import com.aitts.v2.ui.reader.GoogleDriveScreen
-import com.aitts.v2.ui.reader.GoogleDriveViewModel
+import com.aitts.v2.ui.reader.CloudFileManagerScreen
+import com.aitts.v2.ui.reader.CloudFileManagerViewModel
 import com.aitts.v2.ui.reader.ReaderScreen
 import com.aitts.v2.ui.reader.ReaderViewModel
 import com.aitts.v2.ui.rules.RulesScreen
@@ -136,17 +136,17 @@ fun AiTtsAppRoot(container: AppContainer) {
                 BookshelfScreen(
                     viewModel = bookshelfVm,
                     onOpenBook = { bookId -> navController.navigate("reader/$bookId") },
-                    onOpenGoogleDrive = { navController.navigate("google_drive") }
+                    onOpenFileManager = { navController.navigate("file_manager") }
                 )
             }
-            composable("google_drive") {
-                val driveVm: GoogleDriveViewModel = viewModel(factory = GoogleDriveViewModel.Factory(container))
-                GoogleDriveScreen(
-                    viewModel = driveVm,
+            composable("file_manager") {
+                val fmVm: CloudFileManagerViewModel = viewModel(factory = CloudFileManagerViewModel.Factory(container))
+                CloudFileManagerScreen(
+                    viewModel = fmVm,
                     onBack = { navController.popBackStack() },
                     onBookImported = { importedId ->
                         navController.navigate("reader/$importedId") {
-                            popUpTo("google_drive") { inclusive = true }
+                            popUpTo("file_manager") { inclusive = true }
                         }
                     }
                 )

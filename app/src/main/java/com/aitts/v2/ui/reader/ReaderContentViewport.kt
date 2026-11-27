@@ -41,30 +41,6 @@ import com.aitts.v2.reader.model.ReaderSettings
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
-fun rememberReaderColors(paperTheme: ReaderPaperTheme): ResolvedReaderColors {
-    val scheme = MaterialTheme.colorScheme
-    return remember(paperTheme, scheme) {
-        if (paperTheme == ReaderPaperTheme.FOLLOW_APP) {
-            ResolvedReaderColors(
-                background = scheme.background,
-                text = scheme.onBackground,
-                secondaryText = scheme.onSurfaceVariant,
-                highlightBg = scheme.primary.copy(alpha = 0.14f),
-                accent = scheme.primary
-            )
-        } else {
-            ResolvedReaderColors(
-                background = Color(paperTheme.bgHex),
-                text = Color(paperTheme.textHex),
-                secondaryText = Color(paperTheme.secondaryTextHex),
-                highlightBg = Color(paperTheme.highlightHex),
-                accent = scheme.primary
-            )
-        }
-    }
-}
-
-@Composable
 fun ReaderContentViewport(
     chapter: ChapterContent,
     totalChapters: Int,
@@ -79,7 +55,8 @@ fun ReaderContentViewport(
     onLongPressSpeak: (Int) -> Unit,
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
-    loadImage: suspend (String) -> Bitmap?
+    loadImage: suspend (String) -> Bitmap?,
+    onImageClick: (Bitmap) -> Unit = {}
 ) {
     LaunchedEffect(chapter.chapterIndex, pendingScrollBlockIndex) {
         val targetBlock = pendingScrollBlockIndex ?: return@LaunchedEffect
@@ -111,10 +88,7 @@ fun ReaderContentViewport(
         }
     }
 
-    val fontFamily = when (readerSettings.fontFamily) {
-        ReaderFontFamily.SERIF -> FontFamily.Serif
-        ReaderFontFamily.SANS -> FontFamily.SansSerif
-    }
+    val fontFamily = rememberResolvedReaderFontFamily(readerSettings)
 
     LazyColumn(
         state = listState,
@@ -161,7 +135,8 @@ fun ReaderContentViewport(
                 maxImageHeightDp = 420,
                 onTap = { onTapBody() },
                 onLongPress = { onLongPressSpeak(block.index) },
-                loadImage = loadImage
+                loadImage = loadImage,
+                onImageClick = onImageClick
             )
         }
 

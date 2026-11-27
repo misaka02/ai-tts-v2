@@ -12,6 +12,7 @@ import com.aitts.v2.data.SecretStore
 import com.aitts.v2.engine.audio.AudioPipeline
 import com.aitts.v2.engine.cache.AudioDiskCache
 import com.aitts.v2.engine.cloud.GoogleDriveClient
+import com.aitts.v2.engine.cloud.WebDavClient
 import com.aitts.v2.engine.logging.EngineLogger
 import com.aitts.v2.engine.manifest.RemoteManifestRepository
 import com.aitts.v2.engine.network.HttpClientManager
@@ -24,7 +25,11 @@ import com.aitts.v2.reader.BookImportManager
 import com.aitts.v2.reader.BookLibraryRepository
 import com.aitts.v2.reader.EpubImageLoader
 import com.aitts.v2.reader.GoogleDriveRepository
+import com.aitts.v2.reader.LibrarySyncEngine
+import com.aitts.v2.reader.LocalSyncFolderManager
+import com.aitts.v2.reader.ReadiumEngine
 import com.aitts.v2.reader.ReaderTtsController
+import com.aitts.v2.reader.WebDavRepository
 import com.aitts.v2.service.FloatingSubtitleOverlay
 import com.aitts.v2.service.SleepTimerController
 import kotlinx.coroutines.channels.Channel
@@ -112,8 +117,13 @@ class AppContainer(context: Context) {
 
     val bookLibrary = BookLibraryRepository(appContext)
     val bookImportManager = BookImportManager(appContext, bookLibrary)
+    val readiumEngine = ReadiumEngine(appContext)
     val googleDriveClient = GoogleDriveClient(httpManager)
+    val webDavClient = WebDavClient(httpManager)
     val googleDrive = GoogleDriveRepository(appContext, secretStore, googleDriveClient, bookImportManager)
+    val webDav = WebDavRepository(appContext, secretStore, webDavClient, bookImportManager)
+    val localSyncFolder = LocalSyncFolderManager(appContext, bookImportManager)
+    val syncEngine = LibrarySyncEngine(appContext, bookLibrary, localSyncFolder, googleDrive, webDav)
     val epubImageLoader = EpubImageLoader(bookLibrary)
     val readerTts = ReaderTtsController(
         context = appContext,

@@ -35,9 +35,9 @@ class EpubBookParser : BookFormatParser {
                 ?: throw IOException("无效的 EPUB：缺少 container.xml 或 OPF")
             val opf = EpubXmlSupport.parseOpfPackage(zip, opfPath)
                 ?: throw IOException("无效的 EPUB：OPF 解析失败")
-            val tocTitles = EpubXmlSupport.parseTocTitles(zip, opf)
+            val tocEntries = EpubXmlSupport.parseTocEntries(zip, opf)
 
-            val chapters = buildChapterList(zip, opf, tocTitles)
+            val chapters = buildChapterList(zip, opf, tocEntries)
             if (chapters.isEmpty()) {
                 throw IOException("EPUB 中未找到可阅读的章节内容")
             }
@@ -78,7 +78,7 @@ class EpubBookParser : BookFormatParser {
     private fun buildChapterList(
         zip: ZipFile,
         opf: OpfPackage,
-        tocTitles: Map<String, String>
+        tocEntries: Map<String, TocItemEntry>
     ): List<ChapterRef> {
         val list = mutableListOf<ChapterRef>()
         val lowerCaseEntries = buildLowerCaseEntryIndex(zip)
@@ -88,10 +88,19 @@ class EpubBookParser : BookFormatParser {
                 continue
             }
             if (!isReadableSpineType(item.mediaType, item.path)) continue
-            val resolvedTitle = tocTitles[item.path]
+            val tocItem = tocEntries[item.path]
+            val resolvedTitle = tocItem?.title
                 ?: readFallbackTitle(zip, item.path, lowerCaseEntries)
                 ?: "第 ${list.size + 1} 章"
-            list.add(ChapterRef(index = list.size, title = resolvedTitle, locator = item.path))
+            list.add(
+                ChapterRef(
+                    index = list.size,
+                    title = resolvedTitle,
+                    locator = item.path,
+                    depth = tocItem?.depth ?: 0,
+                    fragment = tocItem?.fragment.orEmpty()
+                )
+            )
         }
         return list
     }

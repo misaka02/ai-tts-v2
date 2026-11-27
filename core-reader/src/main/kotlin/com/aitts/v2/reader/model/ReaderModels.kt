@@ -16,10 +16,15 @@ data class ReadingProgress(
     val blockIndex: Int = 0,
     val charOffset: Int = 0,
     val totalChapters: Int = 1,
+    val locatorJson: String = "",
+    val totalProgression: Float = 0f,
     val updatedAt: Long = 0L
 ) {
     val progressPercent: Int
         get() {
+            if (totalProgression > 0f) {
+                return (totalProgression * 100f).toInt().coerceIn(0, 100)
+            }
             val total = totalChapters.coerceAtLeast(1)
             val current = (chapterIndex + 1).coerceIn(1, total)
             return ((current.toFloat() / total) * 100f).toInt().coerceIn(0, 100)
@@ -33,7 +38,20 @@ data class BookBookmark(
     val blockIndex: Int,
     val chapterTitle: String,
     val snippet: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val locatorJson: String = ""
+)
+
+@Serializable
+data class BookHighlight(
+    val id: String,
+    val chapterIndex: Int = 0,
+    val blockIndex: Int = 0,
+    val locatorJson: String = "",
+    val quote: String,
+    val note: String = "",
+    val colorHex: Long = 0xFFFFD54FL,
+    val createdAt: Long = 0L
 )
 
 @Serializable
@@ -49,7 +67,11 @@ data class BookRecord(
     val addedAt: Long = 0L,
     val lastReadAt: Long = 0L,
     val progress: ReadingProgress = ReadingProgress(),
-    val bookmarks: List<BookBookmark> = emptyList()
+    val bookmarks: List<BookBookmark> = emptyList(),
+    val highlights: List<BookHighlight> = emptyList(),
+    val category: String = "",
+    val isPinned: Boolean = false,
+    val sourceSyncKey: String = ""
 )
 
 @Serializable
@@ -58,7 +80,9 @@ data class ChapterRef(
     val title: String,
     val locator: String,
     val startOffset: Long = 0L,
-    val endOffset: Long = 0L
+    val endOffset: Long = 0L,
+    val depth: Int = 0,
+    val fragment: String = ""
 )
 
 @Serializable

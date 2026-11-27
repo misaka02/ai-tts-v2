@@ -62,6 +62,10 @@ class SecretStore(context: Context) {
         }.isSuccess
     }
 
+    fun removeSecret(key: String) {
+        prefs.edit().remove(key).apply()
+    }
+
     fun exportAllCredentials(providerIds: Iterable<String>): Map<String, ProviderCredentials> {
         return providerIds.mapNotNull { id ->
             val creds = getCredentials(id)

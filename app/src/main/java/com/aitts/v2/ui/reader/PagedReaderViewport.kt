@@ -64,12 +64,13 @@ fun PagedReaderViewport(
     onLongPressSpeak: (Int) -> Unit,
     onPrevChapter: (landOnLastPage: Boolean) -> Unit,
     onNextChapter: () -> Unit,
-    loadImage: suspend (String) -> Bitmap?
+    loadImage: suspend (String) -> Bitmap?,
+    onImageClick: (Bitmap) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val coroutineScope = rememberCoroutineScope()
-    val fontFamily = if (readerSettings.fontFamily == ReaderFontFamily.SERIF) FontFamily.Serif else FontFamily.SansSerif
+    val fontFamily = rememberResolvedReaderFontFamily(readerSettings)
 
     BoxWithConstraints(
         modifier = Modifier
@@ -232,7 +233,8 @@ fun PagedReaderViewport(
                                 }
                             },
                             onLongPressSpeak = onLongPressSpeak,
-                            loadImage = loadImage
+                            loadImage = loadImage,
+                            onImageClick = onImageClick
                         )
                     }
                 }
@@ -271,7 +273,8 @@ private fun SingleBookPage(
     activeTtsBlockIndex: Int,
     onTapZone: (Float) -> Unit,
     onLongPressSpeak: (Int) -> Unit,
-    loadImage: suspend (String) -> Bitmap?
+    loadImage: suspend (String) -> Bitmap?,
+    onImageClick: (Bitmap) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -296,7 +299,8 @@ private fun SingleBookPage(
                 maxImageHeightDp = maxImageHeightDp,
                 onTap = onTapZone,
                 onLongPress = { onLongPressSpeak(slice.blockIndex) },
-                loadImage = loadImage
+                loadImage = loadImage,
+                onImageClick = onImageClick
             )
         }
     }

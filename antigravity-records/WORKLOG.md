@@ -192,3 +192,39 @@
      - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 49s`），**0 编译警告**，`Detekt` 0 issues，`Lint` 0 errors，**49/49 单元测试全部通过**（`:core-model:test` `6`、`:core-engine:test` `31`、`:core-reader:test` `10`、`:app:testCloudDebugUnitTest` `2`）。
      - `cloud` R8 APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `1,992,337` 字节（SHA-256 `066F3C253D213A844F1A97D06612457F021769D45E4FFD3A86CC5B25C4B2A3F4`），`apksigner` 校验通过（退出码 `0`）。
      - `full` R8 APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `25,666,419` 字节（SHA-256 `19990E0AEC4C09CC660FFE6A4E33953972E322908960C3061DB7D2584B9897B5`），`apksigner` 校验通过（退出码 `0`）。
+
+
+
+## 11. 2026-11-28 v2.3.0-pre.1 Readium 3.0 工业级 EPUB 阅读器重构、统一文件管理/本地双向同步及真机模拟器实测
+
+针对 `v2.2.0-pre.2` 用户反馈（EPUB 解析与翻页体验不完善、Google Drive 登录繁琐、需要无感本地文件管理器与专有目录同步、仓库 Pre-release 仅保留最新一版），完成全面工业级架构重构、模拟器实测与两轮 Qodo 审查闭环：
+
+1. **Readium Kotlin Toolkit 3.0.0 工业级 EPUB 引擎与 `Jsoup` 索引解析（`:core-reader` & `:app`）**：
+   - 引入 `readium-shared` / `readium-streamer` / `readium-navigator` `3.0.0` + `jsoup` `1.18.3` + `coreLibraryDesugaringEnabled`，将 `MainActivity` 升级为 `FragmentActivity` 宿主。
+   - 新增 [ReadiumEngine.kt](../app/src/main/java/com/aitts/v2/reader/ReadiumEngine.kt) 与 [ReadiumEpubViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumEpubViewport.kt)，实现完整 EPUB 2/3 CSS 排版、日语假名 `<ruby>` 注音、插图展示、嵌套目录跳转、`ActionMode` 长按划词高亮（黄/蓝）/笔记/全书检索/从当前句朗读，以及 TTS 句级高亮联动。
+   - 重构 [EpubXmlSupport.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubXmlSupport.kt)（移除阻断 EPUB 2 `<!DOCTYPE ncx/html>` 的 `disallow-doctype-decl`，并兼容 Android Harmony `DocumentBuilderFactoryImpl` 对 `isXIncludeAware` 抛 `UnsupportedOperationException` 的实机缺陷，同时保留 XXE 防护与嵌套层级提取）及 [EpubHtmlParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubHtmlParser.kt)（全面切换 `Jsoup` DOM 解析，保留标题/引用/列表/表格/SVG 与 `<img>`）。
+
+2. **阅读器全功能体验补齐（`:app` & `:core-reader`）**：
+   - 补齐底部阅读进度滑块拖动跳转（`ReaderChromeAndToc`）、三页签Sheet（`目录` / `书签` / `划线笔记`）与笔记弹窗（`ReaderSearchAndNoteSheets`）、自定义亮度与系统亮度切换 / 屏幕常亮 / 沉浸全屏 `Window` 联动（`ReaderScreen`）、出版商原版样式切换 / 文本对齐 / 字间距与 `.ttf/.otf` 自定义字体导入（`ReaderSheets` / `BookLibraryExtensions`）、插图双指缩放全屏灯箱（`ReaderImageLightbox`），以及书架搜索/排序/置顶/分类与多选批量删除（`BookshelfScreen` / `BookshelfItemCard`）。
+
+3. **无感统一文件管理器、专有本地同步目录与双向同步（`:core-engine` & `:app`）**：
+   - 新增 [CloudStorageModels.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/CloudStorageModels.kt)、[GoogleDriveWriteOps.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleDriveWriteOps.kt) 与完整 WebDAV 客户端 [WebDavClient.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/WebDavClient.kt)（支持 `PROPFIND`/`MKCOL`/`MOVE`/`DELETE`/`GET`/`PUT`，以及 OkHttp `addPathSegment` 保留字符编码、父子路径包含校验、`displayname` 防路径穿越与 Harmony XML 保护）。
+   - 重构统一三栏文件与网盘中心（[CloudFileManagerScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerScreen.kt)、[CloudFileManagerViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerViewModel.kt)、[CloudFileManagerSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerSheets.kt)、[CloudAuthCoordinator.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudAuthCoordinator.kt)）：
+     - **本地专有目录**（[LocalSyncFolderManager.kt](../app/src/main/java/com/aitts/v2/reader/LocalSyncFolderManager.kt)）：默认 `BooksSync`，支持 SAF `OpenDocumentTree` 切换绑定与建目录/重命名/删除/一键扫描导入。
+     - **Google 网盘**：Play Services `Identity.getAuthorizationClient` 一键授权（含 `expiresAt` 预检查与 401 静默续期重试、签名 SHA-1 诊断提示）、零配置 SAF 批量多选直导与手动 Token 高级折叠入口，并扩展 `listNodes` 支持 20 页分页拉取。
+     - **WebDAV 网盘**（[WebDavRepository.kt](../app/src/main/java/com/aitts/v2/reader/WebDavRepository.kt)）与 **双向智能同步引擎**（[LibrarySyncEngine.kt](../app/src/main/java/com/aitts/v2/reader/LibrarySyncEngine.kt)）：支持拉取/推送/双向同步书籍并合并 `aitts_library_state.json` 进度/书签/划线笔记。
+
+4. **Android AVD `pixel_34` 实机验证与 8 张渲染截图留档**：
+   - 使用 R8 压缩签名包 `app-cloud-release.apk` 在 `pixel_34` 实机部署验证：不仅捕获并修复了 `EpubXmlSupport.kt` 在 Android Harmony XML 解析器下的 `isXIncludeAware` 崩溃盲区，还端到端验证并人工逐张查验了 `antigravity-records/screenshots/v2.3.0-pre.1/` 下全部 8 张真实截图（`01_bookshelf.png`、`02_epub2_readium.png`、`03a_reader_chrome.png`、`03b_reader_toc_sheet.png`、`04_epub3_ruby.png`、`05_gbk_txt_paged.png`、`06a_file_local.png`、`06b_file_gdrive.png`），确认 EPUB 2 DOCTYPE 中文、EPUB 3 Ruby 注音、GB18030 TXT 分页与网盘中心均零乱码、零崩溃（`logcat *:E` 0 应用/Readium 异常）。
+
+5. **Qodo CLI 两轮审查与最终全量门禁复验（已达 2 轮止损上限）**：
+   - **Qodo 第 1 轮**（`operation_id: b5807904-bd52-4dc8-9896-d414ffd444c1` / `review_id: 2f4732e2-073a-445b-bc28-1b2caf955227`）：提出 13 项有效发现（升级目录兼容性恢复 `books`、同步顺序先导入后合并状态、显性汇报传输与状态读写失败、Google Drive 上传去 `up_` 前缀、书架直导书籍镜像到同步目录、`listNodes` 分页、Play Services 过期静默刷新、`sourceSyncKey` 唯一化、WebDAV 保留字符编码与防目录穿越、书签位置精确高亮、Readium 目录索引对齐与 EPUB 3 顶级缩进归零），全部当轮修复并通过 `flash` 子代理 53/53 门禁。
+   - **Qodo 第 2 轮**（`operation_id: 4c65a39b-e0fb-456c-8c9a-5db5fe69b149` / `review_id: 22947f4b-edff-446b-86db-5b708466e369`，达 2 轮上限）：确认第 1 轮 12 项直接标 `resolved`（`a2b2a400` 已恢复 `books` 根目录），并修复第 2 轮全部 4 项新增缺陷（`LibrarySyncEngine` 拉取方向条件 `direction != PUSH` 与书架镜像采用 `${safeTitle}_${record.id}.ext` 避免覆盖 `source.epub`、`BookLibraryExtensions` 同书名+格式合并状态、`CloudFileManagerViewModel` 保留 `rawItems` 搜索源、`ReaderViewModel` 初次打开写入 `currentLocatorJson`）。
+   - **最终全量门禁与 R8 打包实测**（全部修改完成后经 `flash` 子代理执行，退出码 `0`）：
+     - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`；全仓 `src/` 含单测共 `152` 个 `.kt` 文件 / `23,288` 行：`core-model/src` 14/1,416、`core-engine/src` 46/6,190、`core-reader/src` 13/2,275、`app/src` 79/13,407）。
+     - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 35s`），`Detekt` 0 issues，`Lint` 0 errors，**53/53 单元测试全部通过**（`:core-model:test` `6`、`:core-engine:test` `34`、`:core-reader:test` `11`、`:app:testCloudDebugUnitTest` `2`）。
+     - `cloud` R8 APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `6,484,476` 字节（SHA-256 `7F5EC09B3C0050DFC0902FFCBCFACA3C1B8ECC1CBE42DC0E121D2F5729832214`），`apksigner` 校验通过（退出码 `0`）。
+     - `full` R8 APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `30,175,478` 字节（SHA-256 `E6C542D13635663A1143D522B3051743D45BF75BB8849BE2CD3F06679D306995`），`apksigner` 校验通过（退出码 `0`）。
+
+6. **GitHub Release 清理与单 Pre-release 发布**：
+   - 删除所有历史旧版 Pre-release 与标签（`v2.1.0-pre.1`、`v2.1.0-pre.2`、`v2.1.0-pre.3`、`v2.2.0-pre.1`、`v2.2.0-pre.2`），仅保留正式基线 `v2.0.0` 与最新预发布 **`v2.3.0-pre.1`**（附带签名 R8 `ai-tts-v2-cloud-v2.3.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.3.0-pre.1.apk`）。

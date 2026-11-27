@@ -29,18 +29,27 @@ class BookImportManager(
 ) {
     private val appContext = context.applicationContext
 
-    suspend fun importFromUri(uri: Uri): Result<BookRecord> = withContext(Dispatchers.IO) {
+    suspend fun importFromUri(uri: Uri, sourceSyncKey: String = ""): Result<BookRecord> = withContext(Dispatchers.IO) {
         try {
             val displayName = resolveDisplayName(uri)
             val rawStream = appContext.contentResolver.openInputStream(uri)
                 ?: throw IOException("无法读取所选文件，请确认文件权限有效")
-            importFromStream(displayName, rawStream)
+            importFromStream(displayName, rawStream, sourceSyncKey)
         } catch (t: Throwable) {
             Result.failure(t)
         }
     }
 
-    suspend fun importFromStream(displayName: String, rawStream: InputStream): Result<BookRecord> = withContext(Dispatchers.IO) {
+    suspend fun importFromStream(
+        displayName: String,
+        rawStream: InputStream,
+        sourceSyncKey: String = ""
+    ): Result<BookRecord> = withContext(Dispatchers.IO) {
+        if (sourceSyncKey.isNotBlank()) {
+            library.booksFlow.value.firstOrNull { it.sourceSyncKey == sourceSyncKey }?.let { existing ->
+                return@withContext Result.success(existing)
+            }
+        }
         val bookId = "book_${UUID.randomUUID().toString().take(8)}"
         val bookDir = library.bookDir(bookId).apply { mkdirs() }
         try {
@@ -69,6 +78,7 @@ class BookImportManager(
                 chapterCount = index.chapters.size.coerceAtLeast(1),
                 addedAt = now,
                 lastReadAt = now,
+                sourceSyncKey = sourceSyncKey,
                 progress = ReadingProgress(
                     chapterIndex = 0,
                     blockIndex = 0,

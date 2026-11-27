@@ -215,6 +215,83 @@ class EpubAndMarkupParserTest {
         assertTrue((htmlParser.readResource(htmlFile, dataImg.resourcePath)?.size ?: 0) > 0)
     }
 
+    @Test
+    fun `parses EPUB 2 with DOCTYPE ncx, DOCTYPE html, nested NCX hierarchy and HTML tables`() {
+        val dir = testDir("epub2_doctype")
+        val epubFile = File(dir, "epub2_doctype.epub")
+        writeZip(
+            epubFile,
+            mapOf(
+                "META-INF/container.xml" to """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <!DOCTYPE container PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+                    <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                      <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+                    </container>
+                """.trimIndent().toByteArray(),
+                "OEBPS/content.opf" to """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+                      <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                        <dc:title>古典文选</dc:title>
+                        <dc:creator>古今</dc:creator>
+                      </metadata>
+                      <manifest>
+                        <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+                        <item id="part1" href="part1.html" media-type="application/xhtml+xml"/>
+                        <item id="ch1" href="ch1.html" media-type="application/xhtml+xml"/>
+                      </manifest>
+                      <spine toc="ncx">
+                        <itemref idref="part1"/>
+                        <itemref idref="ch1"/>
+                      </spine>
+                    </package>
+                """.trimIndent().toByteArray(),
+                "OEBPS/toc.ncx" to """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+                    <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+                      <navMap>
+                        <navPoint id="np1" playOrder="1">
+                          <navLabel><text>第一卷</text></navLabel>
+                          <content src="part1.html"/>
+                          <navPoint id="np2" playOrder="2">
+                            <navLabel><text>第一节 初见</text></navLabel>
+                            <content src="ch1.html#sec1"/>
+                          </navPoint>
+                        </navPoint>
+                      </navMap>
+                    </ncx>
+                """.trimIndent().toByteArray(),
+                "OEBPS/part1.html" to """
+                    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+                    <html><body><h1>第一卷</h1><p>卷首导语</p></body></html>
+                """.trimIndent().toByteArray(),
+                "OEBPS/ch1.html" to """
+                    <!DOCTYPE html>
+                    <html><body>
+                      <h2 id="sec1">第一节 初见</h2>
+                      <p>正文包含表格数据：</p>
+                      <table><tr><th>人物</th><th>阵营</th></tr><tr><td>阿明</td><td>守夜人</td></tr></table>
+                    </body></html>
+                """.trimIndent().toByteArray()
+            )
+        )
+
+        val parser = EpubBookParser()
+        val idx = parser.indexBook(epubFile, "fallback")
+        assertEquals("古典文选", idx.title)
+        assertEquals(2, idx.chapters.size)
+        assertEquals("第一卷", idx.chapters[0].title)
+        assertEquals(0, idx.chapters[0].depth)
+        assertEquals("第一节 初见", idx.chapters[1].title)
+        assertEquals(1, idx.chapters[1].depth)
+        assertEquals("sec1", idx.chapters[1].fragment)
+
+        val ch1 = parser.loadChapter(epubFile, idx.chapters[1])
+        assertTrue(ch1.blocks.any { it.speakableText?.contains("阿明 | 守夜人") == true })
+    }
+
     private fun writeZip(target: File, entries: Map<String, ByteArray>) {
         ZipOutputStream(target.outputStream()).use { zos ->
             entries.forEach { (name, bytes) ->

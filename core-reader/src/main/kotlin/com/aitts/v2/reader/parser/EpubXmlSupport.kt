@@ -5,10 +5,20 @@ import org.w3c.dom.Element
 import org.w3c.dom.NodeList
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.StringReader
 import java.net.URLDecoder
 import java.util.zip.ZipFile
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
+import org.xml.sax.EntityResolver
+import org.xml.sax.InputSource
+
+internal data class TocItemEntry(
+    val path: String,
+    val title: String,
+    val depth: Int = 0,
+    val fragment: String = ""
+)
 
 internal data class ManifestEntry(
     val id: String,
@@ -106,12 +116,16 @@ internal object EpubXmlSupport {
     private fun parseXmlInternal(bytes: ByteArray): Document? = runCatching {
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
+            runCatching { isXIncludeAware = false }
+            runCatching { isExpandEntityReferences = false }
             runCatching { setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true) }
-            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
             runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+            runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
         }
-        factory.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
+        factory.newDocumentBuilder().apply {
+            setEntityResolver(EntityResolver { _, _ -> InputSource(StringReader("")) })
+        }.parse(ByteArrayInputStream(bytes))
     }.getOrNull()
 
     fun findOpfPath(zip: ZipFile): String? {
@@ -155,20 +169,94 @@ internal object EpubXmlSupport {
         )
     }
 
-    fun parseTocTitles(zip: ZipFile, opf: OpfPackage): Map<String, String> {
-        val titles = LinkedHashMap<String, String>()
+    fun parseTocEntries(zip: ZipFile, opf: OpfPackage): Map<String, TocItemEntry> {
+        val entries = LinkedHashMap<String, TocItemEntry>()
         opf.navPath?.let { navPath ->
             readZipEntryBytes(zip, navPath, MAX_METADATA_BYTES)?.let { bytes ->
-                collectNavTitles(bytes, parentDir(navPath), titles)
+                collectNavEntries(bytes, parentDir(navPath), entries)
             }
         }
-        if (titles.isNotEmpty()) return titles
+        if (entries.isNotEmpty()) return entries
         opf.ncxPath?.let { ncxPath ->
             readZipEntryBytes(zip, ncxPath, MAX_METADATA_BYTES)?.let { bytes ->
-                collectNcxTitles(bytes, parentDir(ncxPath), titles)
+                collectNcxEntries(bytes, parentDir(ncxPath), entries)
             }
         }
-        return titles
+        return entries
+    }
+
+    private fun collectNavEntries(bytes: ByteArray, navDir: String, out: MutableMap<String, TocItemEntry>) {
+        val doc = parseXmlDocument(bytes)
+        if (doc != null) {
+            val navs = doc.getElementsByTagName("nav")
+            val rootEl = (0 until navs.length).asSequence()
+                .mapNotNull { navs.item(it) as? Element }
+                .firstOrNull()
+                ?: doc.documentElement
+            if (rootEl != null) {
+                walkNavList(rootEl, navDir, depth = -1, out = out)
+            }
+            if (out.isNotEmpty()) return
+        }
+        val linkRe = Regex(
+            pattern = """<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""",
+            options = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        )
+        val tagStripRe = Regex("<[^>]+>")
+        val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
+        val navHtml = String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
+        for (match in linkRe.findAll(navHtml)) {
+            val rawHref = match.groupValues[1]
+            val path = normalizeZipPath(navDir, rawHref) ?: continue
+            val frag = rawHref.substringAfter('#', "")
+            val rawLabel = match.groupValues[2].replace(tagStripRe, " ")
+            val label = EpubHtmlParser.decodeEntities(rawLabel).replace(Regex("\\s+"), " ").trim()
+            if (label.isNotEmpty()) out.putIfAbsent(path, TocItemEntry(path, label, 0, frag))
+        }
+    }
+
+    private fun walkNavList(el: Element, navDir: String, depth: Int, out: MutableMap<String, TocItemEntry>) {
+        val children = el.childNodes
+        for (i in 0 until children.length) {
+            val child = children.item(i) as? Element ?: continue
+            val tag = child.tagName.substringAfter(':').lowercase()
+            if (tag == "a") {
+                val rawHref = child.getAttribute("href").trim()
+                val label = child.textContent.replace(Regex("\\s+"), " ").trim()
+                val path = normalizeZipPath(navDir, rawHref)
+                if (path != null && label.isNotEmpty()) {
+                    out.putIfAbsent(path, TocItemEntry(path, label, depth.coerceAtLeast(0), rawHref.substringAfter('#', "")))
+                }
+            } else {
+                val nextDepth = if (tag == "ol" || tag == "ul") depth + 1 else depth
+                walkNavList(child, navDir, nextDepth, out)
+            }
+        }
+    }
+
+    private fun collectNcxEntries(bytes: ByteArray, ncxDir: String, out: MutableMap<String, TocItemEntry>) {
+        val doc = parseXmlDocument(bytes) ?: return
+        val navMaps = doc.getElementsByTagName("navMap")
+        val root = if (navMaps.length > 0) navMaps.item(0) as? Element else doc.documentElement
+        if (root != null) {
+            walkNcxPoints(root, ncxDir, depth = 0, out = out)
+        }
+    }
+
+    private fun walkNcxPoints(parent: Element, ncxDir: String, depth: Int, out: MutableMap<String, TocItemEntry>) {
+        val children = parent.childNodes
+        for (i in 0 until children.length) {
+            val child = children.item(i) as? Element ?: continue
+            if (!child.tagName.substringAfter(':').equals("navPoint", ignoreCase = true)) continue
+            val label = firstChildTagText(child, "text")
+            val contentEl = firstDescendant(child, "content")
+            val rawSrc = contentEl?.getAttribute("src")?.trim().orEmpty()
+            val path = normalizeZipPath(ncxDir, rawSrc)
+            if (path != null && label.isNotEmpty()) {
+                out.putIfAbsent(path, TocItemEntry(path, label, depth, rawSrc.substringAfter('#', "")))
+            }
+            walkNcxPoints(child, ncxDir, depth + 1, out)
+        }
     }
 
     private fun parseManifest(doc: Document, opfDir: String): Map<String, ManifestEntry> {
@@ -211,47 +299,6 @@ internal object EpubXmlSupport {
             }
         }
         return null
-    }
-
-    private fun collectNavTitles(bytes: ByteArray, navDir: String, out: MutableMap<String, String>) {
-        val doc = parseXmlDocument(bytes)
-        if (doc != null) {
-            val links = doc.getElementsByTagName("a")
-            for (i in 0 until links.length) {
-                val a = links.item(i) as? Element ?: continue
-                val href = a.getAttribute("href").trim()
-                val label = a.textContent.replace(Regex("\\s+"), " ").trim()
-                val path = normalizeZipPath(navDir, href) ?: continue
-                if (label.isNotEmpty() && !out.containsKey(path)) out[path] = label
-            }
-            if (out.isNotEmpty()) return
-        }
-        val linkRe = Regex(
-            pattern = """<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""",
-            options = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-        )
-        val tagStripRe = Regex("<[^>]+>")
-        val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
-        val navHtml = String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
-        for (match in linkRe.findAll(navHtml)) {
-            val path = normalizeZipPath(navDir, match.groupValues[1]) ?: continue
-            val rawLabel = match.groupValues[2].replace(tagStripRe, " ")
-            val label = EpubHtmlParser.decodeEntities(rawLabel).replace(Regex("\\s+"), " ").trim()
-            if (label.isNotEmpty() && !out.containsKey(path)) out[path] = label
-        }
-    }
-
-    private fun collectNcxTitles(bytes: ByteArray, ncxDir: String, out: MutableMap<String, String>) {
-        val doc = parseXmlDocument(bytes) ?: return
-        val navPoints: NodeList = doc.getElementsByTagName("navPoint")
-        for (i in 0 until navPoints.length) {
-            val np = navPoints.item(i) as? Element ?: continue
-            val label = firstChildTagText(np, "text")
-            val contentEl = firstDescendant(np, "content") ?: continue
-            val src = contentEl.getAttribute("src").trim()
-            val path = normalizeZipPath(ncxDir, src) ?: continue
-            if (label.isNotEmpty() && !out.containsKey(path)) out[path] = label
-        }
     }
 
     private fun firstTagText(doc: Document, vararg tagNames: String): String {

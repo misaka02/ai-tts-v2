@@ -1,6 +1,6 @@
 package com.aitts.v2.ui.reader
 
-import android.app.Activity
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -24,13 +24,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -43,9 +43,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderReadingMode
@@ -59,7 +57,6 @@ fun ReaderScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val view = LocalView.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val readerSettings by viewModel.readerSettingsFlow.collectAsStateWithLifecycle()
     val ttsState by viewModel.ttsStateFlow.collectAsStateWithLifecycle()
@@ -74,31 +71,13 @@ fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     val pageTurnChannel = remember { Channel<Int>(capacity = 4) }
     val pageTurnEvents = remember(pageTurnChannel) { pageTurnChannel.receiveAsFlow() }
+    var lightboxBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
     val colors = rememberReaderColors(readerSettings.paperTheme)
     val appDefaultIsDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    LaunchedEffect(Unit) {
-        runCatching { focusRequester.requestFocus() }
-    }
-
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as? Activity)?.window ?: return@SideEffect
-            val useDarkBg = if (readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP) {
-                appDefaultIsDark
-            } else {
-                readerSettings.paperTheme.isDark
-            }
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !useDarkBg
-        }
-    }
-
-    DisposableEffect(appDefaultIsDark) {
-        onDispose {
-            val window = (view.context as? Activity)?.window ?: return@onDispose
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !appDefaultIsDark
-        }
-    }
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    ReaderSystemWindowEffect(readerSettings, state.showChrome, appDefaultIsDark)
 
     LaunchedEffect(state.statusMessage) {
         state.statusMessage?.let { msg ->
@@ -110,16 +89,13 @@ fun ReaderScreen(
     val book = state.book
     val chapter = state.chapter
     val index = state.index
-    val activeTtsForChapter = ttsState.bookId == book?.id &&
-        (ttsState.isPlaying || ttsState.isSynthesizing) &&
-        ttsState.chapterIndex == chapter?.chapterIndex
-    val activeTtsBlock = if (activeTtsForChapter) ttsState.activeBlockIndex else -1
+    val pub = state.readiumPublication
+    val activeTtsForBook = ttsState.bookId == book?.id && (ttsState.isPlaying || ttsState.isSynthesizing)
+    val activeTtsBlock = if (activeTtsForBook && ttsState.chapterIndex == chapter?.chapterIndex) ttsState.activeBlockIndex else -1
 
     val showJumpBackChip by remember(activeTtsBlock, chapter) {
         derivedStateOf {
-            if (activeTtsBlock < 0 || chapter == null) {
-                false
-            } else {
+            if (activeTtsBlock < 0 || chapter == null) false else {
                 val targetItemIdx = chapter.blocks.indexOfFirst { it.index == activeTtsBlock }.let { if (it < 0) -1 else it + 1 }
                 targetItemIdx >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == targetItemIdx }
             }
@@ -139,80 +115,93 @@ fun ReaderScreen(
             .focusRequester(focusRequester)
             .focusable()
             .onPreviewKeyEvent { ev ->
-                if (readerSettings.readingMode != ReaderReadingMode.PAGED || !readerSettings.volumeKeyPaging) {
-                    return@onPreviewKeyEvent false
-                }
-                if (state.activeSheet != null || ev.type != KeyEventType.KeyDown) {
-                    return@onPreviewKeyEvent false
-                }
+                val canPage = readerSettings.readingMode == ReaderReadingMode.PAGED && readerSettings.volumeKeyPaging
+                if (!canPage || state.activeSheet != null || ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (ev.key) {
-                    Key.VolumeUp -> {
-                        pageTurnChannel.trySend(-1)
-                        true
-                    }
-                    Key.VolumeDown -> {
-                        pageTurnChannel.trySend(1)
-                        true
-                    }
+                    Key.VolumeUp -> { pageTurnChannel.trySend(-1); true }
+                    Key.VolumeDown -> { pageTurnChannel.trySend(1); true }
                     else -> false
                 }
             }
     ) {
+        val ready = book != null && (pub != null || (chapter != null && index != null))
         when {
-            state.isLoading && chapter == null -> {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            state.isLoading && !ready -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            state.errorMessage != null && !ready -> Column(
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(state.errorMessage ?: "无法打开书籍", color = colors.text)
+                Button(onClick = onBack) { Text("返回书架") }
             }
-            state.errorMessage != null && chapter == null -> {
-                Column(
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(state.errorMessage ?: "无法打开书籍", color = colors.text)
-                    Button(onClick = onBack) { Text("返回书架") }
-                }
-            }
-            chapter != null && index != null && book != null -> {
-                if (readerSettings.readingMode == ReaderReadingMode.PAGED) {
-                    PagedReaderViewport(
-                        chapter = chapter,
-                        totalChapters = index.chapters.size,
-                        bookProgressPercent = book.progress.progressPercent,
+            ready && book != null -> {
+                if (pub != null) {
+                    ReadiumEpubViewport(
+                        bookId = book.id,
+                        publication = pub,
+                        readiumEngine = viewModel.readiumEngine,
+                        initialLocator = state.readiumInitialLocator,
                         readerSettings = readerSettings,
                         colors = colors,
-                        activeTtsBlockIndex = activeTtsBlock,
-                        pendingScrollBlockIndex = state.pendingScrollBlockIndex,
-                        pendingScrollCharOffset = state.pendingScrollCharOffset,
-                        pendingLandOnLastPage = state.pendingLandOnLastPage,
+                        highlights = book.highlights,
+                        activeTtsSentence = if (activeTtsForBook) ttsState.activeSentenceText else "",
                         pageTurnEvents = pageTurnEvents,
-                        onConsumedPendingScroll = viewModel::consumePendingScroll,
-                        onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
+                        goToLocatorEvents = viewModel.goToLocatorEvents,
+                        onLocatorChanged = viewModel::onReadiumLocatorChanged,
                         onTapCenter = viewModel::toggleChrome,
-                        onLongPressSpeak = viewModel::startTtsFromBlock,
-                        onPrevChapter = { landLast -> viewModel.stepChapter(-1, landLast) },
-                        onNextChapter = { viewModel.stepChapter(1, false) },
-                        loadImage = viewModel::loadBookImage
+                        onCreateHighlight = viewModel::createHighlight,
+                        onSpeakSelection = viewModel.ttsSearch::startTtsFromReadium,
+                        onSearchSelection = { q ->
+                            viewModel.openSheet(ReaderSheet.SEARCH)
+                            viewModel.ttsSearch.runBookSearch(q)
+                        }
                     )
-                } else {
-                    ReaderContentViewport(
-                        chapter = chapter,
-                        totalChapters = index.chapters.size,
-                        readerSettings = readerSettings,
-                        colors = colors,
-                        listState = listState,
-                        activeTtsBlockIndex = activeTtsBlock,
-                        pendingScrollBlockIndex = state.pendingScrollBlockIndex,
-                        onConsumedPendingScroll = viewModel::consumePendingScroll,
-                        onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
-                        onTapBody = viewModel::toggleChrome,
-                        onLongPressSpeak = viewModel::startTtsFromBlock,
-                        onPrevChapter = { viewModel.stepChapter(-1) },
-                        onNextChapter = { viewModel.stepChapter(1) },
-                        loadImage = viewModel::loadBookImage
-                    )
+                } else if (chapter != null && index != null) {
+                    if (readerSettings.readingMode == ReaderReadingMode.PAGED) {
+                        PagedReaderViewport(
+                            chapter = chapter,
+                            totalChapters = index.chapters.size,
+                            bookProgressPercent = book.progress.progressPercent,
+                            readerSettings = readerSettings,
+                            colors = colors,
+                            activeTtsBlockIndex = activeTtsBlock,
+                            pendingScrollBlockIndex = state.pendingScrollBlockIndex,
+                            pendingScrollCharOffset = state.pendingScrollCharOffset,
+                            pendingLandOnLastPage = state.pendingLandOnLastPage,
+                            pageTurnEvents = pageTurnEvents,
+                            onConsumedPendingScroll = viewModel::consumePendingScroll,
+                            onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
+                            onTapCenter = viewModel::toggleChrome,
+                            onLongPressSpeak = viewModel.ttsSearch::startTtsFromBlock,
+                            onPrevChapter = { landLast -> viewModel.stepChapter(-1, landLast) },
+                            onNextChapter = { viewModel.stepChapter(1, false) },
+                            loadImage = viewModel::loadBookImage,
+                            onImageClick = { lightboxBitmap = it }
+                        )
+                    } else {
+                        ReaderContentViewport(
+                            chapter = chapter,
+                            totalChapters = index.chapters.size,
+                            readerSettings = readerSettings,
+                            colors = colors,
+                            listState = listState,
+                            activeTtsBlockIndex = activeTtsBlock,
+                            pendingScrollBlockIndex = state.pendingScrollBlockIndex,
+                            onConsumedPendingScroll = viewModel::consumePendingScroll,
+                            onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
+                            onTapBody = viewModel::toggleChrome,
+                            onLongPressSpeak = viewModel.ttsSearch::startTtsFromBlock,
+                            onPrevChapter = { viewModel.stepChapter(-1) },
+                            onNextChapter = { viewModel.stepChapter(1) },
+                            loadImage = viewModel::loadBookImage,
+                            onImageClick = { lightboxBitmap = it }
+                        )
+                    }
                 }
 
-                if (readerSettings.readingMode == ReaderReadingMode.SCROLL && showJumpBackChip) {
+                val isNativeScroll = pub == null && readerSettings.readingMode == ReaderReadingMode.SCROLL
+                if (isNativeScroll && showJumpBackChip && chapter != null) {
                     Surface(
                         onClick = {
                             coroutineScope.launch {
@@ -236,6 +225,7 @@ fun ReaderScreen(
                     }
                 }
 
+                val totalChaps = pub?.readingOrder?.size ?: index?.chapters?.size ?: 1
                 AnimatedVisibility(
                     visible = state.showChrome,
                     enter = fadeIn(),
@@ -243,11 +233,15 @@ fun ReaderScreen(
                     modifier = Modifier.align(Alignment.TopCenter)
                 ) {
                     val isBookmarked = book.bookmarks.any {
-                        it.chapterIndex == chapter.chapterIndex && it.blockIndex == state.visibleBlockIndex
+                        if (state.currentLocatorJson.isNotBlank() && it.locatorJson.isNotBlank()) {
+                            it.chapterIndex == state.currentChapterIndex && it.locatorJson == state.currentLocatorJson
+                        } else {
+                            it.chapterIndex == state.currentChapterIndex && it.blockIndex == state.visibleBlockIndex
+                        }
                     }
                     ReaderTopBar(
                         bookTitle = book.title,
-                        chapterTitle = chapter.title,
+                        chapterTitle = state.currentChapterTitle.ifBlank { book.title },
                         isBookmarked = isBookmarked,
                         chromeBg = chromeBg,
                         chromeText = colors.text,
@@ -264,14 +258,16 @@ fun ReaderScreen(
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
                     ReaderBottomBar(
-                        chapterIndex = chapter.chapterIndex,
-                        totalChapters = index.chapters.size,
+                        chapterIndex = state.currentChapterIndex,
+                        totalChapters = totalChaps,
+                        bookProgression = state.currentProgression,
                         isPlaying = ttsState.bookId == book.id && ttsState.isPlaying,
                         isSynthesizing = ttsState.bookId == book.id && ttsState.isSynthesizing,
                         chromeBg = chromeBg,
                         chromeText = colors.text,
                         onPrevChapter = { viewModel.stepChapter(-1) },
                         onNextChapter = { viewModel.stepChapter(1) },
+                        onSeekProgression = viewModel::seekByProgression,
                         onTogglePlay = viewModel::togglePlayPause,
                         onOpenToc = { viewModel.openSheet(ReaderSheet.TOC) },
                         onOpenAppearance = { viewModel.openSheet(ReaderSheet.APPEARANCE) },
@@ -282,46 +278,17 @@ fun ReaderScreen(
         }
     }
 
-    if (chapter != null && index != null && book != null) {
-        when (state.activeSheet) {
-            ReaderSheet.TOC -> ReaderTocSheet(
-                chapters = index.chapters,
-                currentChapterIndex = chapter.chapterIndex,
-                bookmarks = book.bookmarks,
-                onSelectChapter = { viewModel.goToChapter(it, 0) },
-                onSelectBookmark = { viewModel.goToChapter(it.chapterIndex, it.blockIndex) },
-                onRemoveBookmark = viewModel::removeBookmark,
-                onDismiss = { viewModel.openSheet(null) }
-            )
-            ReaderSheet.SEARCH -> ReaderSearchSheet(
-                query = state.searchQuery,
-                hits = state.searchHits,
-                isSearching = state.isSearching,
-                onQueryChange = viewModel::runBookSearch,
-                onSelectHit = { viewModel.goToChapter(it.chapterIndex, it.blockIndex) },
-                onDismiss = { viewModel.openSheet(null) }
-            )
-            ReaderSheet.APPEARANCE -> ReaderAppearanceSheet(
-                settings = readerSettings,
-                onUpdate = viewModel::updateReaderSettings,
-                onDismiss = { viewModel.openSheet(null) }
-            )
-            ReaderSheet.TTS -> ReaderTtsSheet(
-                activeProvider = activeProvider,
-                providers = providers,
-                isPlayingOrSynthesizing = ttsState.bookId == book.id && (ttsState.isPlaying || ttsState.isSynthesizing),
-                sleepActive = sleepActive,
-                sleepRemainingSec = sleepSec,
-                floatingSubtitleEnabled = globalSettings.isFloatingSubtitleEnabled,
-                onSelectProvider = viewModel::selectProvider,
-                onSpeedChange = { viewModel.updateActiveVoice(speed = it) },
-                onPitchChange = { viewModel.updateActiveVoice(pitch = it) },
-                onSetSleepTimer = viewModel::setSleepTimer,
-                onToggleSubtitle = { viewModel.toggleFloatingSubtitle(context, it) },
-                onStopTts = viewModel::stopTts,
-                onDismiss = { viewModel.openSheet(null) }
-            )
-            null -> Unit
-        }
-    }
+    ReaderModalHost(
+        viewModel = viewModel,
+        state = state,
+        readerSettings = readerSettings,
+        ttsState = ttsState,
+        globalSettings = globalSettings,
+        providers = providers,
+        activeProvider = activeProvider,
+        sleepActive = sleepActive,
+        sleepSec = sleepSec,
+        lightboxBitmap = lightboxBitmap,
+        onDismissLightbox = { lightboxBitmap = null }
+    )
 }

@@ -32,6 +32,12 @@ enum class ReaderReadingMode(val displayName: String) {
 }
 
 @Serializable
+enum class ReaderTextAlign(val displayName: String) {
+    START("左对齐"),
+    JUSTIFY("两端对齐")
+}
+
+@Serializable
 data class ReaderSettings(
     val paperTheme: ReaderPaperTheme = ReaderPaperTheme.CREAM,
     val fontSizeSp: Float = 18f,
@@ -43,5 +49,12 @@ data class ReaderSettings(
     val volumeKeyPaging: Boolean = true,
     val firstLineIndent: Boolean = true,
     val autoScrollOnTts: Boolean = true,
-    val autoNextChapterOnTts: Boolean = true
+    val autoNextChapterOnTts: Boolean = true,
+    val brightness: Float = -1f,
+    val keepScreenOn: Boolean = true,
+    val fullscreenImmersive: Boolean = false,
+    val publisherStyles: Boolean = false,
+    val textAlign: ReaderTextAlign = ReaderTextAlign.START,
+    val letterSpacingEm: Float = 0f,
+    val customFontPath: String = ""
 )
