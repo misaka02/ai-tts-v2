@@ -3,18 +3,19 @@
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
 - **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
-- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；前序预发布 [v2.1.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1)、[v2.1.0-pre.2](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.2)；**最新预发布 [v2.1.0-pre.3](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.3)**（Pre-release，含全 10 引擎声学规范对齐、Sonic 音调与残差补速及对应 UI 适配版 `ai-tts-v2-cloud-v2.1.0-pre.3.apk` 与 `ai-tts-v2-full-arm64-v2.1.0-pre.3.apk`）。
+- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；前序预发布 [v2.1.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1)、[v2.1.0-pre.2](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.2)、[v2.1.0-pre.3](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.3)；**最新预发布 [v2.2.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.2.0-pre.1)**（Pre-release，新增纯本地多格式电子书阅读器 `:core-reader` 与原生 TTS 段落同步高亮听书，附带 `ai-tts-v2-cloud-v2.2.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.2.0-pre.1.apk`）。
 - **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包 + 默认发布 GitHub Pre-release”规则。
-- **当前最新验证与产物（2026-11-27 v2.1.0-pre.3 声学规范统一版）**：
+- **当前最新验证与产物（2026-11-27 v2.2.0-pre.1 阅读器+听书一体化版）**：
   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）
-  - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 7s`，`37/37` 单测通过，`Detekt` 0 issues，`Lint` 0 errors）
-  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **1,828,249 字节**（约 **1.74 MiB**，`apksigner` 校验通过）
-  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **25,502,331 字节**（约 **24.32 MiB**，`apksigner` 校验通过）
-  - **Qodo CLI 审查**：基于 `origin/main` 完成第 1 轮自动审查（0 项 `action_required`），并直接批量修复 3 项新增声学边界细节（`Sonic.setPitch` 接管无原生音调/超限音调、放开 Azure `3.0x` 与 OpenAI `4.0x` 保存区间、豆包 `bigtts` 自动隐藏无效原生音调条）后全量通过构建与 37/37 单测。
-- **最新代码体量总计**（不含 `build/`）：**91 个 `.kt` 文件，共 11,981 行**（另含 `Sonic.java`）
-  - `:core-model`：13 个文件，1,267 行
-  - `:core-engine`：33 个文件，4,107 行（另含 `Sonic.java`）
-  - `:app`（`main` + `cloud` + `full`）：45 个文件，6,607 行
+  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 6s`，0 编译警告，`Detekt` 0 issues，`Lint` 0 errors，**45/45 单测全部通过**）
+  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **1,926,801 字节**（约 **1.84 MiB**，SHA-256 `991DD7B382B94CAC2904BBE52FBAFCB9C163E5335D8DFFB5BF42694DA2B44569`，`apksigner` 校验通过）
+  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **25,600,883 字节**（约 **24.41 MiB**，SHA-256 `C7843A7489D48D686699453F595EB1D7E084D9824FCF15DF809E8472BEC8ED34`，`apksigner` 校验通过）
+  - **Qodo CLI 审查**：已完成第 1 轮（`ea3b9209`）与第 2 轮增量复核（`85a5fa1d`，第 1 轮全部 11 项引入问题均确认 `resolved`），并修复第 2 轮指出的 `autoNextChapterOnTts` 分支判断、Markdown/TXT 长行 UTF-8 字符边界与 UTF-16LE/BE `+2` 换行偏移问题，达 2 轮硬上限后全量复验通过。
+- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**123 个 `.kt` 文件，共 17,854 行**（另含 `Sonic.java`）
+  - `:core-model/src`：14 个文件，1,416 行
+  - `:core-engine/src`：39 个文件，5,101 行（另含 `Sonic.java`）
+  - `:core-reader/src`：13 个文件，1,939 行
+  - `:app/src`（`main` + `cloud` + `full` + `test`）：57 个文件，9,398 行
 
 ## 2. 架构与核心改进对照
 
@@ -65,3 +66,4 @@
 - [ ] 悬浮字幕的覆盖层权限引导、纸张主题切换、拖拽位置持久化与锁定穿透手势。
 - [ ] `full` 变体中 Sherpa-ONNX 离线包下载解压（`.tar.bz2` / `.zip`）及离线发音人加载合成。
 - [ ] 配置备份导出（不含敏感凭证与含凭证选项）及口令导入兼容性。
+- [ ] **内置阅读器实机专项核验**：SAF 与文件管理器 `ACTION_VIEW` 导入超长 GBK/UTF-16 TXT、EPUB 2/3（含封面、插图、假名注音 `<ruby>`）、Markdown 与 HTML；验证长按段落直接起读、阅读器高亮与自动滚屏、`自动连播下一章` 开关及跨章节后台播放尾音排空效果（若单个 Markdown 章节超过 512KB 且恰好在 512KB 边界被超长围栏代码块跨越，理论上有可能拆分代码围栏上下文）。

@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ai-tts-v2"
-include(":core-model", ":core-engine", ":app")
+include(":core-model", ":core-engine", ":core-reader", ":app")

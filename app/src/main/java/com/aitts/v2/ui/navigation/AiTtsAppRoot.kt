@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Spellcheck
@@ -49,6 +50,10 @@ import com.aitts.v2.ui.hub.SpeechHubViewModel
 import com.aitts.v2.ui.providers.ProviderEditScreen
 import com.aitts.v2.ui.providers.ProvidersScreen
 import com.aitts.v2.ui.providers.ProvidersViewModel
+import com.aitts.v2.ui.reader.BookshelfScreen
+import com.aitts.v2.ui.reader.BookshelfViewModel
+import com.aitts.v2.ui.reader.ReaderScreen
+import com.aitts.v2.ui.reader.ReaderViewModel
 import com.aitts.v2.ui.rules.RulesScreen
 import com.aitts.v2.ui.rules.RulesViewModel
 import com.aitts.v2.ui.settings.SettingsScreen
@@ -56,6 +61,7 @@ import com.aitts.v2.ui.settings.SettingsViewModel
 
 private sealed class TabRoute(val route: String, val label: String, val icon: ImageVector) {
     data object Hub : TabRoute("hub", "听书台", Icons.Outlined.AutoStories)
+    data object Bookshelf : TabRoute("bookshelf", "书架", Icons.AutoMirrored.Outlined.MenuBook)
     data object Providers : TabRoute("providers", "声库", Icons.Outlined.GraphicEq)
     data object Rules : TabRoute("rules", "词典", Icons.Outlined.Spellcheck)
     data object Settings : TabRoute("settings", "偏好", Icons.Outlined.Tune)
@@ -66,9 +72,10 @@ fun AiTtsAppRoot(container: AppContainer) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
-    val tabs = listOf(TabRoute.Hub, TabRoute.Providers, TabRoute.Rules, TabRoute.Settings)
+    val tabs = listOf(TabRoute.Hub, TabRoute.Bookshelf, TabRoute.Providers, TabRoute.Rules, TabRoute.Settings)
 
     val hubVm: SpeechHubViewModel = viewModel(factory = SpeechHubViewModel.Factory(container))
+    val bookshelfVm: BookshelfViewModel = viewModel(factory = BookshelfViewModel.Factory(container))
     val providersVm: ProvidersViewModel = viewModel(factory = ProvidersViewModel.Factory(container))
     val rulesVm: RulesViewModel = viewModel(factory = RulesViewModel.Factory(container))
     val settingsVm: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(container))
@@ -81,6 +88,14 @@ fun AiTtsAppRoot(container: AppContainer) {
                 restoreState = true
             }
             hubVm.speakExternalText(sharedText)
+        }
+    }
+
+    LaunchedEffect(container) {
+        container.incomingBookUriEvents.collect { uri ->
+            bookshelfVm.importBook(uri) { importedId ->
+                navController.navigate("reader/$importedId") { launchSingleTop = true }
+            }
         }
     }
 
@@ -113,6 +128,26 @@ fun AiTtsAppRoot(container: AppContainer) {
                     viewModel = hubVm,
                     onOpenProviders = { navController.navigate(TabRoute.Providers.route) },
                     onEditActiveProvider = { id -> navController.navigate("provider_edit/$id") }
+                )
+            }
+            composable(TabRoute.Bookshelf.route) {
+                BookshelfScreen(
+                    viewModel = bookshelfVm,
+                    onOpenBook = { bookId -> navController.navigate("reader/$bookId") }
+                )
+            }
+            composable(
+                route = "reader/{bookId}",
+                arguments = listOf(navArgument("bookId") { type = NavType.StringType })
+            ) { entry ->
+                val bookId = entry.arguments?.getString("bookId").orEmpty()
+                val readerVm: ReaderViewModel = viewModel(
+                    key = "reader_$bookId",
+                    factory = ReaderViewModel.Factory(container, bookId)
+                )
+                ReaderScreen(
+                    viewModel = readerVm,
+                    onBack = { navController.popBackStack() }
                 )
             }
             composable(TabRoute.Providers.route) {

@@ -11,6 +11,14 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+-keep,includedescriptorclasses class com.aitts.v2.reader.model.**$$serializer { *; }
+-keepclassmembers class com.aitts.v2.reader.model.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.aitts.v2.reader.model.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
 # Optional codecs in commons-compress not used by OfflineModelInstaller (uses Tar + BZip2 only)
 -dontwarn org.brotli.**
 -dontwarn com.github.luben.zstd.**

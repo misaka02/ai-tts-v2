@@ -1,6 +1,7 @@
 package com.aitts.v2.di
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.aitts.v2.audio.AndroidAudioDecoder
 import com.aitts.v2.audio.StreamingAudioTrackPlayer
@@ -18,6 +19,10 @@ import com.aitts.v2.engine.provider.DiscoveryDiskCache
 import com.aitts.v2.engine.provider.TtsProviderRegistry
 import com.aitts.v2.engine.synthesis.SynthesisOrchestrator
 import com.aitts.v2.offline.PlatformOfflineBackend
+import com.aitts.v2.reader.BookImportManager
+import com.aitts.v2.reader.BookLibraryRepository
+import com.aitts.v2.reader.EpubImageLoader
+import com.aitts.v2.reader.ReaderTtsController
 import com.aitts.v2.service.FloatingSubtitleOverlay
 import com.aitts.v2.service.SleepTimerController
 import kotlinx.coroutines.channels.Channel
@@ -41,8 +46,17 @@ class AppContainer(context: Context) {
     private val incomingTextChannel = Channel<String>(capacity = 16)
     val incomingTextEvents = incomingTextChannel.receiveAsFlow()
 
+    private val incomingBookUriChannel = Channel<Uri>(capacity = 8)
+    val incomingBookUriEvents = incomingBookUriChannel.receiveAsFlow()
+
+    var stopHubPreviewCallback: (() -> Unit)? = null
+
     fun submitIncomingText(text: String) {
         incomingTextChannel.trySend(text)
+    }
+
+    fun submitIncomingBookUri(uri: Uri) {
+        incomingBookUriChannel.trySend(uri)
     }
 
     val diskCache = AudioDiskCache(File(appContext.cacheDir, "tts_audio_cache_v2"))
@@ -93,4 +107,18 @@ class AppContainer(context: Context) {
             }
         )
     }
+
+    val bookLibrary = BookLibraryRepository(appContext)
+    val bookImportManager = BookImportManager(appContext, bookLibrary)
+    val epubImageLoader = EpubImageLoader(bookLibrary)
+    val readerTts = ReaderTtsController(
+        context = appContext,
+        orchestrator = orchestrator,
+        previewPlayer = previewPlayer,
+        preferences = preferences,
+        bookLibrary = bookLibrary,
+        sleepTimer = sleepTimer,
+        subtitleOverlay = subtitleOverlay,
+        onBeforeStart = { stopHubPreviewCallback?.invoke() }
+    )
 }

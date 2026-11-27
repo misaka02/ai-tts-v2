@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
 
         val container = (application as AiTtsApplication).container
         extractIncomingText(intent)?.let { container.submitIncomingText(it) }
+        extractIncomingBookUri(intent)?.let { container.submitIncomingBookUri(it) }
 
         setContent {
             val settings by container.preferences.settingsFlow.collectAsStateWithLifecycle()
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         val container = (application as AiTtsApplication).container
         extractIncomingText(intent)?.let { container.submitIncomingText(it) }
+        extractIncomingBookUri(intent)?.let { container.submitIncomingBookUri(it) }
     }
 
     private fun extractIncomingText(intent: Intent?): String? {
@@ -55,5 +57,10 @@ class MainActivity : ComponentActivity() {
             else -> null
         }
         return text?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun extractIncomingBookUri(intent: Intent?): android.net.Uri? {
+        if (intent?.action != Intent.ACTION_VIEW) return null
+        return intent.data
     }
 }

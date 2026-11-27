@@ -18,6 +18,9 @@ class StreamingAudioTrackPlayer {
 
     private val lock = Any()
     private var track: AudioTrack? = null
+    @Volatile
+    private var framesWritten: Long = 0L
+    private var currentSampleRate: Int = 24000
 
     private val _isPlayingFlow = MutableStateFlow(false)
     val isPlayingFlow: StateFlow<Boolean> = _isPlayingFlow.asStateFlow()
@@ -53,6 +56,8 @@ class StreamingAudioTrackPlayer {
 
         synchronized(lock) {
             track = audioTrack
+            framesWritten = 0L
+            currentSampleRate = sampleRate.coerceAtLeast(8000)
             audioTrack.play()
             _isPlayingFlow.value = true
         }
@@ -68,15 +73,31 @@ class StreamingAudioTrackPlayer {
             if (active.playState != AudioTrack.PLAYSTATE_PLAYING) break
             val written = active.write(pcm16Bytes, offset, pcm16Bytes.size - offset, AudioTrack.WRITE_BLOCKING)
             if (written <= 0) break
+            framesWritten += written / 2L
             offset += written
         }
     }
 
     fun finishStream() {
+        val active = synchronized(lock) { track } ?: return
+        val targetFrames = framesWritten
+        val rate = currentSampleRate
+        val deadline = System.currentTimeMillis() + 3000L
+        while (System.currentTimeMillis() < deadline) {
+            val sameActive = synchronized(lock) { track === active }
+            if (!sameActive) return
+            val head = runCatching { active.playbackHeadPosition.toLong() }.getOrDefault(targetFrames)
+            val remainingFrames = targetFrames - head
+            if (remainingFrames <= 0L) break
+            val stepMs = ((remainingFrames * 1000L) / rate).coerceIn(15L, 60L)
+            runCatching { Thread.sleep(stepMs) }
+        }
         synchronized(lock) {
-            runCatching { track?.stop() }
-            runCatching { track?.release() }
+            if (track !== active) return
+            runCatching { active.stop() }
+            runCatching { active.release() }
             track = null
+            framesWritten = 0L
             _isPlayingFlow.value = false
             _rmsFlow.value = 0f
         }

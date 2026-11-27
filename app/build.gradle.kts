@@ -88,6 +88,7 @@ android {
 dependencies {
     implementation(project(":core-model"))
     implementation(project(":core-engine"))
+    implementation(project(":core-reader"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

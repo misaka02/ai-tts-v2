@@ -4,5 +4,6 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SentenceSegment(
-    val text: String
+    val text: String,
+    val sourceIndex: Int = -1
 )

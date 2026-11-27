@@ -14,6 +14,7 @@ import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
 import com.aitts.v2.model.ProviderType
+import com.aitts.v2.model.SentenceSegment
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.model.VoiceModel
 import kotlinx.coroutines.CancellationException
@@ -186,6 +187,52 @@ class SynthesisOrchestratorTest {
 
         assertTrue(done)
         assertTrue(logger.entriesFlow.value.any { it.sessionId == "sess_stream" && it.title.contains("合成播音完成") })
+    }
+
+    @Test
+    fun `preSegmented input preserves sourceIndex via onSegmentMeta`() = runTest {
+        val http = HttpClientManager()
+        val logger = EngineLogger()
+        val cache = AudioDiskCache(tempFolder.newFolder("cache4"))
+        val audioPipeline = AudioPipeline { bytes, rate -> Result.success(DecodedPcm(bytes, rate, 1)) }
+        val mockProvider = object : TtsProvider {
+            override val type = ProviderType.OFFLINE_SHERPA
+            override val capabilities = ProviderCapabilities()
+            override suspend fun fetchVoices(config: TtsProviderConfig, credentials: ProviderCredentials): List<VoiceModel> = emptyList()
+            override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> =
+                Result.success(SynthesizedAudio(ByteArray(32), 24000, isRawPcm = true))
+        }
+        val registry = TtsProviderRegistry(http, offlineProvider = mockProvider)
+        val orchestrator = SynthesisOrchestrator(registry, audioPipeline, cache, http, logger)
+        val cfg = TtsProviderConfig(id = "off_meta", type = ProviderType.OFFLINE_SHERPA, name = "Offline")
+        val segments = listOf(
+            SentenceSegment("第一段正文", sourceIndex = 2),
+            SentenceSegment("第一段尾句", sourceIndex = 2),
+            SentenceSegment("第二段正文", sourceIndex = 5)
+        )
+        val receivedSourceIndices = mutableListOf<Int>()
+        orchestrator.execute(
+            "sess_meta",
+            SynthesisInput(
+                rawText = "",
+                settings = GlobalSettings(isAudioCacheEnabled = false, sentencePauseMs = 0),
+                activeConfig = cfg,
+                allProviders = listOf(cfg),
+                rules = emptyList(),
+                credentialsLookup = { ProviderCredentials() },
+                preSegmented = segments
+            ),
+            object : SynthesisSink {
+                override fun onStart(sampleRate: Int) = true
+                override fun onSegmentMeta(segmentIndex: Int, totalSegments: Int, segment: SentenceSegment) {
+                    receivedSourceIndices.add(segment.sourceIndex)
+                }
+                override fun onPcmChunk(pcm16Bytes: ByteArray) {}
+                override fun onDone() {}
+                override fun onError(error: Throwable) {}
+            }
+        )
+        assertEquals(listOf(2, 2, 5), receivedSourceIndices)
     }
 
     private fun recordingSink(onComplete: () -> Unit) = object : SynthesisSink {

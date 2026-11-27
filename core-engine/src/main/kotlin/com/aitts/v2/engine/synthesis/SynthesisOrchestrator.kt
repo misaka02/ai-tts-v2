@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
 interface SynthesisSink {
     fun onStart(sampleRate: Int): Boolean
     fun onSegmentStart(segmentIndex: Int, totalSegments: Int, text: String) {}
+    fun onSegmentMeta(segmentIndex: Int, totalSegments: Int, segment: SentenceSegment) {}
     fun onPcmChunk(pcm16Bytes: ByteArray)
     fun onDone()
     fun onError(error: Throwable)
@@ -47,7 +48,8 @@ data class SynthesisInput(
     val credentialsLookup: (String) -> ProviderCredentials,
     val systemSpeed: Float = 1.0f,
     val systemPitch: Float = 1.0f,
-    val fadeGainProvider: () -> Float = { 1.0f }
+    val fadeGainProvider: () -> Float = { 1.0f },
+    val preSegmented: List<SentenceSegment>? = null
 )
 
 /**
@@ -79,7 +81,8 @@ class SynthesisOrchestrator(
         val targetRate = 24000
 
         try {
-            val segments = TextPipeline.process(input.rawText, input.rules, input.settings)
+            val segments = input.preSegmented?.filter { it.text.isNotBlank() }
+                ?: TextPipeline.process(input.rawText, input.rules, input.settings)
             if (segments.isEmpty()) {
                 if (sink.onStart(targetRate)) sink.onDone()
                 return@withContext
@@ -106,6 +109,7 @@ class SynthesisOrchestrator(
                 currentCoroutineContext().ensureActive()
                 val seg = segments[i]
                 sink.onSegmentStart(i, segments.size, seg.text)
+                sink.onSegmentMeta(i, segments.size, seg)
 
                 if (segments.size > 1) {
                     val aheadEnd = minOf(i + windowSize + 1, segments.size)

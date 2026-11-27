@@ -17,6 +17,7 @@ detekt {
         files(
             "$rootDir/core-model/src/main/kotlin",
             "$rootDir/core-engine/src/main/kotlin",
+            "$rootDir/core-reader/src/main/kotlin",
             "$rootDir/app/src/main/java",
             "$rootDir/app/src/cloud/java",
             "$rootDir/app/src/full/java"
@@ -49,6 +50,7 @@ val qualityGate by tasks.registering {
         "detekt",
         ":core-model:test",
         ":core-engine:test",
+        ":core-reader:test",
         ":app:testCloudDebugUnitTest",
         ":app:lintCloudDebug"
     )

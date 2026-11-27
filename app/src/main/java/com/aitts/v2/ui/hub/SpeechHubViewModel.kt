@@ -80,6 +80,7 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
     private var lastSynthesizedPcm: ByteArray = ByteArray(0)
 
     init {
+        container.stopHubPreviewCallback = { stopPreview() }
         viewModelScope.launch {
             container.sleepTimer.expiredFlow.collect {
                 stopPreview()
@@ -173,6 +174,7 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
             stopPreview()
             return
         }
+        container.readerTts.stop()
         val text = _uiState.value.inputText.trim()
         if (text.isEmpty()) {
             _uiState.update { it.copy(statusMessage = "请输入要朗读的文本") }
@@ -296,6 +298,7 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
     fun clearLogs() = container.logger.clear()
 
     override fun onCleared() {
+        container.stopHubPreviewCallback = null
         stopPreview()
     }
 

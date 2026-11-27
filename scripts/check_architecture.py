@@ -28,7 +28,7 @@ def iter_kt_files(base: Path) -> list[Path]:
 
 
 def check_file_limits_and_imports(violations: list[str]) -> None:
-    for module in ("core-model", "core-engine", "app"):
+    for module in ("core-model", "core-engine", "core-reader", "app"):
         for src_set in ("main", "cloud", "full"):
             src_dir = ROOT / module / "src" / src_set
             for kt_file in iter_kt_files(src_dir):
@@ -42,10 +42,10 @@ def check_file_limits_and_imports(violations: list[str]) -> None:
 
                 for idx, line in enumerate(lines, start=1):
                     stripped = line.strip()
-                    if module == "core-model" and (
+                    if module in ("core-model", "core-reader") and (
                         stripped.startswith("import android.") or stripped.startswith("import okhttp3.")
                     ):
-                        violations.append(f"[LAYER] {rel}:{idx} forbidden import in core-model: {stripped}")
+                        violations.append(f"[LAYER] {rel}:{idx} forbidden import in {module}: {stripped}")
                     if module == "core-engine" and stripped.startswith("import android."):
                         violations.append(f"[LAYER] {rel}:{idx} forbidden android import in core-engine: {stripped}")
                     if module == "app" and "/ui/" in f"/{rel}":
