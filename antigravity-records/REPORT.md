@@ -3,28 +3,20 @@
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
 - **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
-- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；已按用户要求清理所有历史旧 Pre-release，**唯一最新预发布 [v2.3.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.3.0-pre.1)**（Pre-release，Readium 3.0 工业级 EPUB 阅读器重构 + 统一文件管理器/专有同步目录/WebDAV/Google 网盘一键登录，附带 `ai-tts-v2-cloud-v2.3.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.3.0-pre.1.apk`）。
+- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；已清理旧 Pre-release `v2.3.0-pre.1`，**唯一最新预发布 [v2.4.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.4.0-pre.1)**（Pre-release，全量排版参数打通 + 四页签紧凑设置 UI + 无损电子书图片提取/复制/画廊 + 高亮互动/页眉页脚 + Google Drive 浏览器 PKCE/`client_secret.json` 导入修复，附带 `ai-tts-v2-cloud-v2.4.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.4.0-pre.1.apk`）。
 - **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包 + 默认发布 GitHub Pre-release”规则。
-- **当前最新验证与产物（2026-11-28 v2.3.0-pre.1 Readium 3.0 EPUB + 统一文件管理/同步版）**：
+- **当前最新验证与产物（2026-11-28 v2.4.0-pre.1 完整阅读排版 + 无损插图 + Google 登录修复版）**：
   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）
-  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 35s`，`Detekt` 0 issues，`Lint` 0 errors，**53/53 单测全部通过**）
-  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **6,484,476 字节**（约 **6.18 MiB**，SHA-256 `7F5EC09B3C0050DFC0902FFCBCFACA3C1B8ECC1CBE42DC0E121D2F5729832214`，`apksigner` 校验通过）
-  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **30,175,478 字节**（约 **28.78 MiB**，SHA-256 `E6C542D13635663A1143D522B3051743D45BF75BB8849BE2CD3F06679D306995`，`apksigner` 校验通过）
+  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 4m`，`0` Kotlin 警告，`Detekt` 0 issues，`Lint` 0 errors，**59/59 单测全部通过**：`core-model` 6、`core-engine` 37、`core-reader` 14、`app` 2）
+  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **6,550,148 字节**（约 **6.25 MiB**，SHA-256 `D509DA412FB71E9C126DCA16D507EC29A4D37F4033A7DC2B318B3B981CD30148`，`apksigner` 校验通过）
+  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **30,241,150 字节**（约 **28.84 MiB**，SHA-256 `1FB8C612AA43E4D28FC9C764FBE19442612D29DDE6CF216E7983CA7E4F66C8E4`，`apksigner` 校验通过）
   - **Android `pixel_34` 实机模拟器截图验收**（`0` 应用/Readium 崩溃）：
-    - [01_bookshelf.png](screenshots/v2.3.0-pre.1/01_bookshelf.png)（三本书籍同步进书架）
-    - [02_epub2_readium.png](screenshots/v2.3.0-pre.1/02_epub2_readium.png)（EPUB 2 `DOCTYPE` 中文 CSS 与插图）
-    - [03a_reader_chrome.png](screenshots/v2.3.0-pre.1/03a_reader_chrome.png)（阅读器顶栏与底部进度滑块/功能栏）
-    - [03b_reader_toc_sheet.png](screenshots/v2.3.0-pre.1/03b_reader_toc_sheet.png)（目录/书签/划线笔记三页签抽屉）
-    - [04_epub3_ruby.png](screenshots/v2.3.0-pre.1/04_epub3_ruby.png)（EPUB 3 假名 `<ruby>` 注音精排）
-    - [05_gbk_txt_paged.png](screenshots/v2.3.0-pre.1/05_gbk_txt_paged.png)（GB18030 TXT 横向真分页无乱码）
-    - [06a_file_local.png](screenshots/v2.3.0-pre.1/06a_file_local.png)（本地专有同步目录文件管理器）
-    - [06b_file_gdrive.png](screenshots/v2.3.0-pre.1/06b_file_gdrive.png)（Google 网盘 Play Services 一键登录 + SAF 直选）
-  - **Qodo CLI 审查（v2.3.0-pre.1）**：已完成第 1 轮（`b5807904-bd52-4dc8-9896-d414ffd444c1` / `review_id: 2f4732e2-073a-445b-bc28-1b2caf955227`）与第 2 轮复核（`4c65a39b-e0fb-456c-8c9a-5db5fe69b149` / `review_id: 22947f4b-edff-446b-86db-5b708466e369`，确认第 1 轮 12 项直接 `resolved`，修复其余全部问题及第 2 轮 4 项新增边界缺陷），达 2 轮硬上限后全量复验通过。
-- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**152 个 `.kt` 文件，共 23,288 行**（另含 `Sonic.java`）
-  - `:core-model/src`：14 个文件，1,416 行
-  - `:core-engine/src`：46 个文件，6,190 行（另含 `Sonic.java`）
-  - `:core-reader/src`：13 个文件，2,275 行
-  - `:app/src`（`main` + `cloud` + `full` + `test`）：79 个文件，13,407 行
+    - [01_reader_settings_4tab.png](screenshots/v2.4.0-pre.1/01_reader_settings_4tab.png)（四页签紧凑半屏设置面板 + 配色色卡与实时正文预览）
+    - [02_epub_typography_footer.png](screenshots/v2.4.0-pre.1/02_epub_typography_footer.png)（EPUB 排版渲染 + 常驻页眉章节名 + 底部精确位置/时间/电量进度栏）
+    - [03_epub_image_gallery_or_lightbox.png](screenshots/v2.4.0-pre.1/03_epub_image_gallery_or_lightbox.png)（全屏插图灯箱含分辨率显示与复制/保存原图/分享浮层）
+    - [04_gdrive_auth_card.png](screenshots/v2.4.0-pre.1/04_gdrive_auth_card.png)（Google 网盘接入卡片：桌面端 `client_secret.json` 导入 + 浏览器 PKCE 永久授权 + Play 授权/SHA-1 排查）
+  - **Qodo CLI 审查（v2.4.0-pre.1，达 2 轮上限）**：第 1 轮（`d2d41f5c-8389-41db-b4af-4fc85b0df0c1` / `run_id: add5e0ab87fb4da18a847dfc9669b701`）检出 6 项 `introduced` 发现并全部修复；第 2 轮（`ae0c16a1-b8b5-4910-8ceb-5d93b173f76d` / `run_id: 202b7d48d3134a918f742f03429e9bd8`）确认第 1 轮全部 6 项为 `resolved`，并将第 2 轮 4 项建议全部修复后重跑全门禁通过。
+- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**165 个 `.kt` 文件**（另含 `Sonic.java`；`core-model/src` 14、`core-engine/src` 48、`core-reader/src` 14、`app/src` 89，全 `src/main` 文件严格 `<= 350` 行）
 
 ## 2. 架构与核心改进对照
 

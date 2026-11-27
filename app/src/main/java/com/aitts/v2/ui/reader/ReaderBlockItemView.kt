@@ -1,7 +1,9 @@
 package com.aitts.v2.ui.reader
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,8 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -41,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.aitts.v2.reader.model.ReaderBlock
+import com.aitts.v2.reader.model.ReaderFontFamily
+import com.aitts.v2.reader.model.ReaderImageFilter
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.model.ReaderTextAlign
 
@@ -57,24 +61,30 @@ fun ReaderBlockItemView(
     colors: ResolvedReaderColors,
     maxImageHeightDp: Int,
     onTap: (fractionX: Float) -> Unit,
-    onLongPress: () -> Unit,
+    onLongPress: (String) -> Unit,
     loadImage: suspend (String) -> Bitmap?,
-    onImageClick: (Bitmap) -> Unit = {}
+    onImageClick: (String, Bitmap) -> Unit = { _, _ -> }
 ) {
     val activeBg = if (isActive) colors.highlightBg else Color.Transparent
-    val align = if (settings.textAlign == ReaderTextAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start
+    val align = when (settings.textAlign) {
+        ReaderTextAlign.JUSTIFY -> TextAlign.Justify
+        ReaderTextAlign.CENTER -> TextAlign.Center
+        ReaderTextAlign.START, ReaderTextAlign.AUTO -> TextAlign.Start
+    }
+    val baseWeight = FontWeight(settings.fontWeight.coerceIn(300, 700))
     val rowModifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(8.dp))
         .background(activeBg)
-        .pointerInput(block.index, block.speakableText != null) {
+        .pointerInput(block.index, block.speakableText) {
             detectTapGestures(
                 onTap = { pos ->
                     val frac = if (size.width > 0) pos.x / size.width else 0.5f
                     onTap(frac)
                 },
                 onLongPress = {
-                    if (block.speakableText != null) onLongPress()
+                    val txt = block.speakableText
+                    if (!txt.isNullOrBlank()) onLongPress(txt)
                 }
             )
         }
@@ -92,10 +102,12 @@ fun ReaderBlockItemView(
                 Text(
                     text = displayText,
                     fontFamily = fontFamily,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight((settings.fontWeight + 200).coerceIn(600, 900)),
                     fontSize = (settings.fontSizeSp * scale).sp,
                     lineHeight = (settings.fontSizeSp * scale * 1.38f).sp,
-                    color = colors.text
+                    textAlign = align,
+                    color = colors.text,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -109,6 +121,7 @@ fun ReaderBlockItemView(
                 Text(
                     text = displayText,
                     fontFamily = fontFamily,
+                    fontWeight = baseWeight,
                     fontStyle = if (block.isQuote) FontStyle.Italic else FontStyle.Normal,
                     fontSize = settings.fontSizeSp.sp,
                     lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
@@ -123,6 +136,7 @@ fun ReaderBlockItemView(
             var bmp by remember(block.resourcePath) { mutableStateOf<Bitmap?>(null) }
             LaunchedEffect(block.resourcePath) { bmp = loadImage(block.resourcePath) }
             val loaded = bmp
+            val imgFilter = remember(settings.nightImageFilter) { resolveImageColorFilter(settings.nightImageFilter) }
             if (loaded != null || block.altText.isNotBlank()) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -134,11 +148,12 @@ fun ReaderBlockItemView(
                             bitmap = loaded.asImageBitmap(),
                             contentDescription = block.altText,
                             contentScale = ContentScale.Fit,
+                            colorFilter = imgFilter,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = maxImageHeightDp.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { onImageClick(loaded) }
+                                .clickable { onImageClick(block.resourcePath, loaded) }
                         )
                     }
                     if (block.altText.isNotBlank()) {
@@ -154,6 +169,23 @@ fun ReaderBlockItemView(
     }
 }
 
+private fun resolveImageColorFilter(filter: ReaderImageFilter): ColorFilter? = when (filter) {
+    ReaderImageFilter.NONE -> null
+    ReaderImageFilter.DARKEN -> ColorFilter.colorMatrix(
+        ColorMatrix().apply { setToScale(0.75f, 0.75f, 0.75f, 1f) }
+    )
+    ReaderImageFilter.INVERT -> ColorFilter.colorMatrix(
+        ColorMatrix(
+            floatArrayOf(
+                -1f, 0f, 0f, 0f, 255f,
+                0f, -1f, 0f, 0f, 255f,
+                0f, 0f, -1f, 0f, 255f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+    )
+}
+
 @Composable
 fun rememberResolvedReaderFontFamily(settings: ReaderSettings): FontFamily {
     val path = settings.customFontPath
@@ -165,10 +197,10 @@ fun rememberResolvedReaderFontFamily(settings: ReaderSettings): FontFamily {
             }.getOrNull()
         } else {
             null
-        } ?: if (settings.fontFamily == com.aitts.v2.reader.model.ReaderFontFamily.SERIF) {
-            FontFamily.Serif
-        } else {
-            FontFamily.SansSerif
+        } ?: when (settings.fontFamily) {
+            ReaderFontFamily.SERIF -> FontFamily.Serif
+            ReaderFontFamily.SANS -> FontFamily.SansSerif
+            ReaderFontFamily.MONOSPACE -> FontFamily.Monospace
         }
     }
 }

@@ -1,10 +1,17 @@
+@file:OptIn(org.readium.r2.shared.ExperimentalReadiumApi::class)
+
 package com.aitts.v2.ui.reader
 
-import android.view.ActionMode
-import android.view.Menu
-import android.view.MenuItem
+import android.os.Handler
+import android.os.Looper
 import android.view.View
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -18,136 +25,167 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
-import androidx.compose.material3.MaterialTheme
+import com.aitts.v2.reader.LocalFontHttpServer
 import com.aitts.v2.reader.ReadiumEngine
 import com.aitts.v2.reader.model.BookHighlight
 import com.aitts.v2.reader.model.ReaderSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.navigator.input.TapEvent
-import org.readium.r2.navigator.util.DirectionalNavigationAdapter
+import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.util.Url
 
-private const val MENU_HIGHLIGHT_YELLOW = 1001
-private const val MENU_HIGHLIGHT_BLUE = 1002
-private const val MENU_NOTE = 1003
-private const val MENU_SPEAK = 1004
-private const val MENU_SEARCH = 1005
+private const val CUSTOM_FONT_FAMILY = "AiTtsCustomFont"
 
 /**
- * Hosts Readium 3.0.0 `EpubNavigatorFragment` inside Compose for standards-compliant
- * EPUB 2/3 layout, CSS styling, tables, ruby furigana, text selection highlights, and TTS sync.
+ * Hosts Readium 3.0.0 `EpubNavigatorFragment` inside Compose for EPUB 2/3 rendering,
+ * custom font injection, image tap bridge, interactive highlights, configurable tap zones, and running bars.
  */
 @Composable
 fun ReadiumEpubViewport(
     bookId: String,
     publication: Publication,
     readiumEngine: ReadiumEngine,
+    localFontServer: LocalFontHttpServer,
     initialLocator: Locator?,
     readerSettings: ReaderSettings,
     colors: ResolvedReaderColors,
     highlights: List<BookHighlight>,
+    chapterTitle: String,
+    positionIndex: Int,
+    positionsTotal: Int,
+    totalProgression: Float,
+    isTtsActive: Boolean,
     activeTtsSentence: String,
     pageTurnEvents: Flow<Int>,
     goToLocatorEvents: Flow<Locator>,
-    onLocatorChanged: (chapterIdx: Int, locatorJson: String, totalProgression: Float, chapterTitle: String) -> Unit,
+    onLocatorChanged: (chapterIdx: Int, locatorJson: String, totalProg: Float, title: String, posIdx: Int) -> Unit,
     onTapCenter: () -> Unit,
     onCreateHighlight: (quote: String, locatorJson: String, colorHex: Long, openNoteDialog: Boolean) -> Unit,
+    onHighlightTapped: (highlightId: String) -> Unit,
+    onImageTapped: (resourcePath: String) -> Unit,
     onSpeakSelection: (quote: String, locatorJson: String) -> Unit,
     onSearchSelection: (quote: String) -> Unit
 ) {
     val context = LocalContext.current
     val activity = context as? FragmentActivity ?: return
     val scope = rememberCoroutineScope()
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val containerId = remember(bookId) { View.generateViewId() }
     val appIsDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val appBgArgb = MaterialTheme.colorScheme.background.toArgb()
     val appTextArgb = MaterialTheme.colorScheme.onBackground.toArgb()
 
+    val currentSettings by rememberUpdatedState(readerSettings)
     val currentTapCenter by rememberUpdatedState(onTapCenter)
     val currentLocatorCb by rememberUpdatedState(onLocatorChanged)
     val currentCreateHighlight by rememberUpdatedState(onCreateHighlight)
+    val currentHighlightTap by rememberUpdatedState(onHighlightTapped)
+    val currentImageTap by rememberUpdatedState(onImageTapped)
     val currentSpeakSelection by rememberUpdatedState(onSpeakSelection)
     val currentSearchSelection by rememberUpdatedState(onSearchSelection)
 
+    val customFontUrl = remember(readerSettings.customFontPath) {
+        localFontServer.serveFont(readerSettings.customFontPath)
+    }
     var navigatorRef by remember(bookId, publication) { mutableStateOf<EpubNavigatorFragment?>(null) }
     var containerViewRef by remember(bookId, publication) { mutableStateOf<FragmentContainerView?>(null) }
+    var latestLocator by remember(bookId, publication) { mutableStateOf(initialLocator) }
 
-    val prefs = remember(readerSettings, appIsDark, appBgArgb, appTextArgb) {
-        readiumEngine.buildPreferences(readerSettings, appIsDark, appBgArgb, appTextArgb)
+    val prefs = remember(readerSettings, appIsDark, appBgArgb, appTextArgb, customFontUrl) {
+        readiumEngine.buildPreferences(
+            settings = readerSettings,
+            appIsDark = appIsDark,
+            appBgArgb = appBgArgb,
+            appTextArgb = appTextArgb,
+            customFontFamilyName = if (customFontUrl != null) CUSTOM_FONT_FAMILY else null
+        )
     }
 
-    AndroidView(
-        factory = { ctx ->
-            FragmentContainerView(ctx).apply {
-                id = containerId
-                containerViewRef = this
-            }
-        },
-        modifier = Modifier.fillMaxSize()
-    )
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        if (readerSettings.showHeaderBar) {
+            ReaderMiniHeaderBar(
+                chapterTitle.ifBlank { publication.metadata.title.orEmpty() },
+                readerSettings.horizontalPaddingDp,
+                colors.secondaryText
+            )
+        }
+        AndroidView(
+            factory = { ctx -> FragmentContainerView(ctx).apply { id = containerId; containerViewRef = this } },
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = readerSettings.verticalPaddingDp.coerceIn(4f, 40f).dp)
+        )
+        if (readerSettings.showFooterBar) {
+            val leftLabel = if (positionsTotal > 0 && positionIndex > 0) "第 $positionIndex/$positionsTotal 位置" else "EPUB 精排"
+            val pct = (totalProgression * 100f).toInt().coerceIn(0, 100)
+            val rightLabel = if (isTtsActive) "朗读中 · $pct%" else "全书 $pct%"
+            ReaderMiniFooterBar(
+                leftLabel = leftLabel,
+                rightLabel = rightLabel,
+                showBatteryTime = readerSettings.showBatteryTime,
+                horizontalPaddingDp = readerSettings.horizontalPaddingDp,
+                textColor = colors.secondaryText,
+                accentColor = colors.accent,
+                highlightRight = isTtsActive
+            )
+        }
+    }
 
-    DisposableEffect(bookId, publication, containerViewRef) {
+    DisposableEffect(bookId, publication, containerViewRef, customFontUrl) {
         val hostView = containerViewRef ?: return@DisposableEffect onDispose {}
         val fm = activity.supportFragmentManager
         val fragmentTag = "readium_epub_$bookId"
         val navigatorHolder = arrayOfNulls<EpubNavigatorFragment>(1)
 
-        val selectionCallback = object : ActionMode.Callback {
-            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                menu.add(Menu.NONE, MENU_HIGHLIGHT_YELLOW, 0, "黄高亮")
-                menu.add(Menu.NONE, MENU_HIGHLIGHT_BLUE, 1, "蓝高亮")
-                menu.add(Menu.NONE, MENU_NOTE, 2, "写笔记")
-                menu.add(Menu.NONE, MENU_SPEAK, 3, "从此朗读")
-                menu.add(Menu.NONE, MENU_SEARCH, 4, "全书检索")
-                return true
-            }
+        val selectionCallback = buildSelectionActionCallback(
+            context = context,
+            scope = scope,
+            navigatorProvider = { navigatorHolder[0] },
+            onHighlight = { q, loc, color, openNote -> currentCreateHighlight(q, loc, color, openNote) },
+            onSpeak = { q, loc -> currentSpeakSelection(q, loc) },
+            onSearch = { q -> currentSearchSelection(q) }
+        )
 
-            override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
-
-            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-                val nav = navigatorHolder[0] ?: return false
-                if (item.itemId !in listOf(MENU_HIGHLIGHT_YELLOW, MENU_HIGHLIGHT_BLUE, MENU_NOTE, MENU_SPEAK, MENU_SEARCH)) {
-                    return false
+        val navConfig = EpubNavigatorFragment.Configuration(
+            selectionActionModeCallback = selectionCallback,
+            shouldApplyInsetsPadding = false
+        ).apply {
+            if (customFontUrl != null) {
+                Url(customFontUrl)?.let { parsedUrl ->
+                    addFontFamilyDeclaration(FontFamily(CUSTOM_FONT_FAMILY)) { addFontFace { addSource(parsedUrl) } }
                 }
-                scope.launch {
-                    val sel = nav.currentSelection() ?: return@launch
-                    val quote = sel.locator.text.highlight.orEmpty().trim()
-                    val locJson = sel.locator.toJSON().toString()
-                    nav.clearSelection()
-                    mode.finish()
-                    when (item.itemId) {
-                        MENU_HIGHLIGHT_YELLOW -> currentCreateHighlight(quote, locJson, 0xFFFFD54FL, false)
-                        MENU_HIGHLIGHT_BLUE -> currentCreateHighlight(quote, locJson, 0xFF81D4FAL, false)
-                        MENU_NOTE -> currentCreateHighlight(quote, locJson, 0xFFFFD54FL, true)
-                        MENU_SPEAK -> currentSpeakSelection(quote, locJson)
-                        MENU_SEARCH -> if (quote.isNotBlank()) currentSearchSelection(quote)
-                    }
-                }
-                return true
             }
-
-            override fun onDestroyActionMode(mode: ActionMode) = Unit
+            registerJavascriptInterface("AiTtsImageBridge") { link ->
+                ReadiumImageBridge(link.href.toString()) { resolved -> mainHandler.post { currentImageTap(resolved) } }
+            }
         }
 
-        val factory = EpubNavigatorFactory(publication = publication)
-        val fragFactory = factory.createFragmentFactory(
-            initialLocator = initialLocator,
+        val paginationListener = object : EpubNavigatorFragment.PaginationListener {
+            override fun onPageLoaded() {
+                scope.launch { runCatching { navigatorHolder[0]?.evaluateJavascript(IMAGE_TAP_JS) } }
+            }
+
+            override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) = Unit
+        }
+
+        val startLoc = navigatorRef?.currentLocator?.value ?: latestLocator ?: initialLocator
+        val fragFactory = EpubNavigatorFactory(publication).createFragmentFactory(
+            initialLocator = startLoc,
             initialPreferences = prefs,
-            configuration = EpubNavigatorFragment.Configuration(
-                selectionActionModeCallback = selectionCallback
-            )
+            paginationListener = paginationListener,
+            configuration = navConfig
         )
-        val frag = fragFactory.instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name)
-            as EpubNavigatorFragment
+        val frag = fragFactory.instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
         navigatorHolder[0] = frag
 
         val existing = fm.findFragmentByTag(fragmentTag)
@@ -159,40 +197,40 @@ fun ReadiumEpubViewport(
         frag.addInputListener(object : InputListener {
             override fun onTap(event: TapEvent): Boolean {
                 val width = hostView.width.takeIf { it > 0 } ?: return false
-                val fx = event.point.x / width.toFloat()
-                if (fx in 0.28f..0.72f) {
-                    currentTapCenter()
-                    return true
-                }
-                return false
+                return handleEpubTapZone(currentSettings.tapZoneMode, event.point.x / width.toFloat(), frag) { currentTapCenter() }
             }
         })
-        frag.addInputListener(DirectionalNavigationAdapter(frag, animatedTransition = true))
+        frag.addDecorationListener(
+            "user-highlights",
+            object : DecorableNavigator.Listener {
+                override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
+                    currentHighlightTap(event.decoration.id)
+                    return true
+                }
+            }
+        )
         navigatorRef = frag
 
         onDispose {
             navigatorRef = null
             if (!fm.isStateSaved) {
-                fm.findFragmentByTag(fragmentTag)?.let {
-                    fm.beginTransaction().remove(it).commitAllowingStateLoss()
-                }
+                fm.findFragmentByTag(fragmentTag)?.let { fm.beginTransaction().remove(it).commitAllowingStateLoss() }
             }
         }
     }
 
-    LaunchedEffect(navigatorRef, prefs) {
-        navigatorRef?.submitPreferences(prefs)
-    }
+    LaunchedEffect(navigatorRef, prefs) { navigatorRef?.submitPreferences(prefs) }
 
     LaunchedEffect(navigatorRef) {
         val nav = navigatorRef ?: return@LaunchedEffect
         nav.currentLocator.collect { loc ->
+            latestLocator = loc
             val chapIdx = readiumEngine.resolveChapterIndex(publication, loc)
             val totalProg = (loc.locations.totalProgression ?: 0.0).toFloat()
+            val posIdx = loc.locations.position ?: 0
             val title = loc.title?.takeIf { it.isNotBlank() }
-                ?: publication.readingOrder.getOrNull(chapIdx)?.title
-                ?: "第 ${chapIdx + 1} 章"
-            currentLocatorCb(chapIdx, loc.toJSON().toString(), totalProg, title)
+                ?: publication.readingOrder.getOrNull(chapIdx)?.title ?: "第 ${chapIdx + 1} 章"
+            currentLocatorCb(chapIdx, loc.toJSON().toString(), totalProg, title, posIdx)
         }
     }
 
@@ -200,11 +238,7 @@ fun ReadiumEpubViewport(
         val nav = navigatorRef ?: return@LaunchedEffect
         val decorations = highlights.mapNotNull { h ->
             val loc = readiumEngine.parseLocator(h.locatorJson) ?: return@mapNotNull null
-            Decoration(
-                id = h.id,
-                locator = loc,
-                style = Decoration.Style.Highlight(tint = h.colorHex.toInt())
-            )
+            Decoration(id = h.id, locator = loc, style = Decoration.Style.Highlight(tint = h.colorHex.toInt(), isActive = true))
         }
         nav.applyDecorations(decorations, group = "user-highlights")
     }
@@ -212,10 +246,7 @@ fun ReadiumEpubViewport(
     LaunchedEffect(navigatorRef, activeTtsSentence, readerSettings.autoScrollOnTts) {
         val nav = navigatorRef ?: return@LaunchedEffect
         val snippet = activeTtsSentence.trim().take(36)
-        if (snippet.isBlank()) {
-            nav.applyDecorations(emptyList(), group = "tts-active")
-            return@LaunchedEffect
-        }
+        if (snippet.isBlank()) { nav.applyDecorations(emptyList(), group = "tts-active"); return@LaunchedEffect }
         val hits = readiumEngine.searchPublication(publication, snippet, maxResults = 3)
         val curChap = readiumEngine.resolveChapterIndex(publication, nav.currentLocator.value)
         val matchLoc = hits.firstOrNull { it.hit.chapterIndex == curChap }?.let {
@@ -226,23 +257,17 @@ fun ReadiumEpubViewport(
                 listOf(Decoration("tts-now", matchLoc, Decoration.Style.Highlight(tint = colors.accent.toArgb()))),
                 group = "tts-active"
             )
-            if (readerSettings.autoScrollOnTts) {
-                nav.go(matchLoc, animated = true)
-            }
+            if (readerSettings.autoScrollOnTts) nav.go(matchLoc, animated = true)
         }
     }
 
     LaunchedEffect(navigatorRef, pageTurnEvents) {
         val nav = navigatorRef ?: return@LaunchedEffect
-        pageTurnEvents.collect { delta ->
-            if (delta < 0) nav.goBackward(animated = true) else nav.goForward(animated = true)
-        }
+        pageTurnEvents.collect { delta -> if (delta < 0) nav.goBackward(animated = true) else nav.goForward(animated = true) }
     }
 
     LaunchedEffect(navigatorRef, goToLocatorEvents) {
         val nav = navigatorRef ?: return@LaunchedEffect
-        goToLocatorEvents.collect { loc ->
-            nav.go(loc, animated = true)
-        }
+        goToLocatorEvents.collect { loc -> nav.go(loc, animated = true) }
     }
 }

@@ -228,3 +228,39 @@
 
 6. **GitHub Release 清理与单 Pre-release 发布**：
    - 删除所有历史旧版 Pre-release 与标签（`v2.1.0-pre.1`、`v2.1.0-pre.2`、`v2.1.0-pre.3`、`v2.2.0-pre.1`、`v2.2.0-pre.2`），仅保留正式基线 `v2.0.0` 与最新预发布 **`v2.3.0-pre.1`**（附带签名 R8 `ai-tts-v2-cloud-v2.3.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.3.0-pre.1.apk`）。
+
+---
+
+## 12. v2.4.0-pre.1 排版引擎全量打通、四页签紧凑设置、无损插图画廊与 Google 登录修复
+
+针对 `v2.3.0-pre.1` 使用反馈（排版参数不全、设置 UI 杂乱难用、无法提取与复制电子书插图、Google 网盘 Play 服务未绑定签名报错），完成完整设计与实机验收闭环：
+
+1. **双引擎全量排版参数打通（`:core-reader` & `:app`）**：
+   - 兼容扩展 [ReaderSettings.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderSettings.kt)（保留原有字段与默认值并新增 `effectiveIndentEm()` 迁移 helper，新增字重 `300..700`、上下页边距、英文词间距、首行缩进格数、英文断字/连字、横屏分栏 `AUTO/ONE/TWO`、竖排 `verticalText`、阅读方向 `LTR/RTL`、夜间图片滤镜 `NONE/DARKEN/INVERT`、屏幕点击区域方案 `STANDARD/LEFT_HAND/ALL_NEXT/SWIPE_ONLY`、反转音量键、页眉/页脚/时间电量显示开关及自定义配色），并通过 `ReaderSettingsCompatibilityTest` 覆盖旧版 JSON 向后兼容。
+   - 升级 [ReadiumEngine.kt](../app/src/main/java/com/aitts/v2/reader/ReadiumEngine.kt) 与新增 [LocalFontHttpServer.kt](../app/src/main/java/com/aitts/v2/reader/LocalFontHttpServer.kt)（回环 `127.0.0.1` 有界线程池本地字库服务），使 EPUB 与 TXT/MD/HTML 均支持自定义 `.ttf`/`.otf` 字体、字重、字间距、首行缩进与全套排版参数，并接入 `publication.positions()` 实现高精度进度条跳转与页码统计。
+   - 同步升级 [ChapterPaginator.kt](../app/src/main/java/com/aitts/v2/ui/reader/ChapterPaginator.kt)、[ReaderBlockItemView.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderBlockItemView.kt)、[PagedReaderViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/PagedReaderViewport.kt) 与 [ReaderContentViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderContentViewport.kt)。
+
+2. **四页签紧凑半屏设置 UI 重构（`:app`）**：
+   - 将原杂乱的设置抽屉重构拆分为 [ReaderSettingsControls.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSettingsControls.kt)、[ReaderSettingsTabs.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSettingsTabs.kt) 与 [ReaderSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSheets.kt)：采用浅遮罩半屏高度面板方便实时预览正文，按 **「外观 / 字体 / 排版 / 交互」** 四页签清晰分区，每项参数独立一行标签+数值+`-`/`+`微调按钮+滑块，顶部支持一键「恢复默认」，底栏新增快捷日/夜模式切换；听书滚屏/连播开关归位至 [ReaderTtsSheet.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderTtsSheet.kt)。
+
+3. **电子书无损图片提取、剪贴板复制、保存相册与全书画廊（`:app`）**：
+   - 新增 [BookImageExportHelper.kt](../app/src/main/java/com/aitts/v2/reader/BookImageExportHelper.kt) 与 [ReaderMediaHelper.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderMediaHelper.kt)：直接读取原始未压缩字节，支持写入 `MediaStore` 相册（`Pictures/AI-TTS/<书名>/`）、通过 `FileProvider` 写入剪贴板供其他应用直接粘贴原图、系统分享及一键批量导出全书插图（含 `32 MB` 资源与双轴降采样 OOM 保护）。
+   - 升级 [ReadiumEpubViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumEpubViewport.kt) 与 [ReadiumViewportSupport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumViewportSupport.kt)，通过 `AiTtsImageBridge` + `evaluateJavascript` 打通 EPUB 正文点击 `<img>`/`<svg><image>` 直接弹出全屏灯箱 [ReaderImageLightbox.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderImageLightbox.kt)（显示分辨率、支持图库上下翻页、复制/保存/分享）；目录弹窗新增第 4 页签「插图」网格画廊 [ReaderImageGalleryTab.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderImageGalleryTab.kt)。
+
+4. **EPUB 与原生阅读交互补强（`:app`）**：
+   - 为 Readium 视口注册 `DecorableNavigator.Listener`，支持点击正文高亮直接换色（4 色）/写笔记/复制/删除；划词菜单补齐「复制」与绿/粉高亮；新增共享常驻页眉/页脚与实时时间/电量组件 [ReaderStatusBars.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderStatusBars.kt)；TXT/MD 段落长按升级为轻量操作弹窗（从此处朗读/复制整段/加书签）。
+
+5. **Google Drive 登录彻底修复（`:core-engine` & `:app`）**：
+   - 新增 [GoogleOAuthClientJsonParser.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleOAuthClientJsonParser.kt) 与单测 `GoogleOAuthClientJsonParserTest`（支持 `installed` 桌面端 OAuth JSON 一键导入解析，前置拦截与随机回环端口不兼容的 `web` 凭证并给出清晰操作引导）。
+   - 在 [CloudAuthCoordinator.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudAuthCoordinator.kt) 与 [CloudFileManagerSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerSheets.kt) 主推打通 **「导入 `client_secret.json` + 浏览器 OAuth 2.0 PKCE 永久自动续期登录」**，支持 `app/build.gradle.kts` 可选 `AITTS_GDRIVE_CLIENT_ID` 构建期注入（不把 `client_secret` 打进 APK），并对 Play Services `ApiException`（如 `10` 未绑定 `com.aitts.engine` + SHA-1、`7` 网络阻断、`16` GMS 缺失）与网络超时提供精确分诊及包名/SHA-1 一键复制。
+
+6. **Emulator `pixel_34` 实机验收、Qodo 两轮审查与最终全门禁实测**：
+   - `pixel_34`（`app-cloud-release.apk` R8）单轮实机截图留档于 `antigravity-records/screenshots/v2.4.0-pre.1/`（`01_reader_settings_4tab.png`、`02_epub_typography_footer.png`、`03_epub_image_gallery_or_lightbox.png`、`04_gdrive_auth_card.png`），`0` 应用/Readium 崩溃。
+   - **Qodo 第 1 轮**（`operation_id: d2d41f5c-8389-41db-b4af-4fc85b0df0c1`，`run_id: add5e0ab87fb4da18a847dfc9669b701`）：6 项新引入发现全部修复。
+   - **Qodo 第 2 轮**（`operation_id: ae0c16a1-b8b5-4910-8ceb-5d93b173f76d`，`run_id: 202b7d48d3134a918f742f03429e9bd8`，达 2 轮上限）：确认 Round 1 全部 6 项为 `resolved`，并将 Round 2 新检出的 4 项建议（自定义字体切换保留实时定位 `latestLocator`、`LocalFontHttpServer` 有界 4 线程池、`ReaderMediaHelper` 取消旧异步读图任务、`toggleDayNightQuick` 传入 `appIsDark`）全部一次性修复。
+   - **最终全量门禁与 R8 打包实测**（全部修改完成后由 `flash` 子代理执行，退出码 `0`）：
+     - `python scripts/check_architecture.py`：`0 violations`（`165` 个 `.kt` 文件，全文件 `<= 350` 行）。
+     - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：`BUILD SUCCESSFUL in 4m`，`0` Kotlin 编译警告，`Detekt` 0 issues，`Lint` 0 errors，**59/59 单元测试通过**（`core-model`: 6、`core-engine`: 37、`core-reader`: 14、`app`: 2）。
+     - `cloud` R8 APK：`6,550,148` 字节（SHA-256 `D509DA412FB71E9C126DCA16D507EC29A4D37F4033A7DC2B318B3B981CD30148`，`apksigner` 退出码 `0`）。
+     - `full` R8 APK：`30,241,150` 字节（SHA-256 `1FB8C612AA43E4D28FC9C764FBE19442612D29DDE6CF216E7983CA7E4F66C8E4`，`apksigner` 退出码 `0`）。
+   - 删除旧预发布 `v2.3.0-pre.1`，发布唯一最新预发布 **`v2.4.0-pre.1`** 随附双 R8 签名 APK。

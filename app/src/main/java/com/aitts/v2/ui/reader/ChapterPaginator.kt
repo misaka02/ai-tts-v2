@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.aitts.v2.reader.model.ChapterContent
 import com.aitts.v2.reader.model.ReaderBlock
@@ -124,7 +125,7 @@ object ChapterPaginator {
             }
             val style = TextStyle(
                 fontFamily = fontFamily,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight((settings.fontWeight + 200).coerceIn(600, 900)),
                 fontSize = (settings.fontSizeSp * scale).sp,
                 lineHeight = (settings.fontSizeSp * scale * 1.38f).sp
             )
@@ -136,12 +137,20 @@ object ChapterPaginator {
         }
 
         private fun placeParagraph(block: ReaderBlock.Paragraph) {
-            val indentPrefix = if (settings.firstLineIndent && !block.isQuote) "\u3000\u3000" else ""
+            val indentEm = settings.effectiveIndentEm()
+            val indentPrefix = when {
+                block.isQuote -> ""
+                indentEm >= 1.5f -> "\u3000\u3000"
+                indentEm >= 0.5f -> "\u3000"
+                else -> ""
+            }
             val style = TextStyle(
                 fontFamily = fontFamily,
+                fontWeight = FontWeight(settings.fontWeight.coerceIn(300, 700)),
                 fontStyle = if (block.isQuote) FontStyle.Italic else FontStyle.Normal,
                 fontSize = settings.fontSizeSp.sp,
-                lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp
+                lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+                letterSpacing = settings.letterSpacingEm.em
             )
             placeTextSlices(block, block.text, style, prefix = indentPrefix)
         }
@@ -190,11 +199,7 @@ object ChapterPaginator {
         private fun findLastFitLine(layout: androidx.compose.ui.text.TextLayoutResult, maxHeight: Int): Int {
             var fit = -1
             for (line in 0 until layout.lineCount) {
-                if (layout.getLineBottom(line) <= maxHeight) {
-                    fit = line
-                } else {
-                    break
-                }
+                if (layout.getLineBottom(line) <= maxHeight) fit = line else break
             }
             return fit
         }

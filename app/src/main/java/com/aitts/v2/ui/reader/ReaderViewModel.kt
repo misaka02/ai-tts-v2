@@ -1,6 +1,6 @@
 package com.aitts.v2.ui.reader
 
-import android.graphics.Bitmap
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -9,19 +9,15 @@ import com.aitts.v2.di.AppContainer
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.reader.ReaderTtsState
-import com.aitts.v2.reader.addHighlight
 import com.aitts.v2.reader.importCustomFont
 import com.aitts.v2.reader.model.BookFormat
-import com.aitts.v2.reader.model.BookHighlight
 import com.aitts.v2.reader.model.BookIndex
 import com.aitts.v2.reader.model.BookRecord
-import com.aitts.v2.reader.model.BookSearchHit
 import com.aitts.v2.reader.model.ChapterContent
 import com.aitts.v2.reader.model.ChapterRef
+import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.parser.BookFormatRegistry
-import com.aitts.v2.reader.removeHighlight
-import com.aitts.v2.reader.updateHighlightNote
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,37 +31,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.readium.r2.shared.publication.Locator
-import org.readium.r2.shared.publication.Publication
-import java.util.UUID
-
-enum class ReaderSheet { TOC, SEARCH, APPEARANCE, TTS }
-
-data class ReaderUiState(
-    val book: BookRecord? = null,
-    val index: BookIndex? = null,
-    val chapter: ChapterContent? = null,
-    val readiumPublication: Publication? = null,
-    val readiumInitialLocator: Locator? = null,
-    val readiumToc: List<ChapterRef> = emptyList(),
-    val currentChapterIndex: Int = 0,
-    val currentChapterTitle: String = "",
-    val currentProgression: Float = 0f,
-    val currentLocatorJson: String = "",
-    val isLoading: Boolean = true,
-    val errorMessage: String? = null,
-    val visibleBlockIndex: Int = 0,
-    val pendingScrollBlockIndex: Int? = null,
-    val pendingScrollCharOffset: Int = 0,
-    val pendingLandOnLastPage: Boolean = false,
-    val showChrome: Boolean = false,
-    val activeSheet: ReaderSheet? = null,
-    val editingHighlight: BookHighlight? = null,
-    val searchQuery: String = "",
-    val searchHits: List<BookSearchHit> = emptyList(),
-    val searchLocators: List<String> = emptyList(),
-    val isSearching: Boolean = false,
-    val statusMessage: String? = null
-)
 
 class ReaderViewModel(
     private val container: AppContainer,
@@ -91,7 +56,10 @@ class ReaderViewModel(
     private val goToLocatorChannel = Channel<Locator>(capacity = 8)
     val goToLocatorEvents = goToLocatorChannel.receiveAsFlow()
     val readiumEngine get() = container.readiumEngine
+    val localFontServer get() = container.localFontServer
     internal val ttsSearch = ReaderTtsSearchHelper(container, bookId, viewModelScope, _uiState)
+    internal val media = ReaderMediaHelper(container, viewModelScope, _uiState)
+    internal val annotations = ReaderAnnotationHelper(container, bookId, _uiState)
 
     private var lastSavedChapter = -1
     private var lastSavedBlock = -1
@@ -134,19 +102,23 @@ class ReaderViewModel(
                     }
                     val savedLoc = container.readiumEngine.parseLocator(record.progress.locatorJson)
                         ?: container.readiumEngine.locatorFromChapter(pub, record.progress.chapterIndex)
+                    val imgs = container.bookImageExporter.listBookImages(record, pub)
                     _uiState.update {
                         it.copy(
                             book = record, index = loadedIndex, readiumPublication = pub,
-                            readiumInitialLocator = savedLoc, readiumToc = toc,
+                            readiumInitialLocator = savedLoc, readiumToc = toc, bookImages = imgs,
                             currentChapterIndex = record.progress.chapterIndex,
                             currentChapterTitle = toc.firstOrNull()?.title ?: record.title,
                             currentLocatorJson = savedLoc?.toJSON()?.toString().orEmpty(),
                             currentProgression = record.progress.totalProgression, isLoading = false
                         )
                     }
+                    val positions = container.readiumEngine.loadPositions(pub)
+                    _uiState.update { it.copy(readiumPositions = positions) }
                 },
                 onFailure = { err ->
-                    _uiState.update { it.copy(book = record, index = loadedIndex) }
+                    val imgs = container.bookImageExporter.listBookImages(record, null)
+                    _uiState.update { it.copy(book = record, index = loadedIndex, bookImages = imgs) }
                     loadNativeChapter(record, loadedIndex, record.progress.chapterIndex, record.progress.blockIndex)
                     _uiState.update { it.copy(statusMessage = "已回退兼容模式: ${err.message}") }
                 }
@@ -158,12 +130,12 @@ class ReaderViewModel(
         loadNativeChapter(record, loadedIndex, startChap, record.progress.blockIndex, record.progress.charOffset)
     }
 
-    fun onReadiumLocatorChanged(chapterIdx: Int, locatorJson: String, totalProg: Float, chapterTitle: String) {
+    fun onReadiumLocatorChanged(chapterIdx: Int, locatorJson: String, totalProg: Float, chapterTitle: String, posIdx: Int) {
         val total = _uiState.value.readiumPublication?.readingOrder?.size ?: _uiState.value.index?.chapters?.size ?: 1
         _uiState.update {
             it.copy(
                 currentChapterIndex = chapterIdx, currentChapterTitle = chapterTitle,
-                currentProgression = totalProg, currentLocatorJson = locatorJson
+                currentProgression = totalProg, currentLocatorJson = locatorJson, currentPositionIndex = posIdx
             )
         }
         val now = System.currentTimeMillis()
@@ -191,9 +163,7 @@ class ReaderViewModel(
                 lastSavedChapter = chapterIndex; lastSavedBlock = targetBlockIndex; lastSavedCharOffset = 0
                 lastSavedTimeMs = System.currentTimeMillis()
                 container.bookLibrary.updateProgress(bookId, chapterIndex, targetBlockIndex, index.chapters.size, 0)
-            } else {
-                lastSavedChapter = -1
-            }
+            } else lastSavedChapter = -1
         }
     }
 
@@ -212,7 +182,8 @@ class ReaderViewModel(
         val st = _uiState.value
         val pub = st.readiumPublication
         if (pub != null) {
-            container.readiumEngine.locatorForProgression(pub, fraction.toDouble())?.let { goToLocatorChannel.trySend(it) }
+            container.readiumEngine.locatorForProgression(pub, st.readiumPositions, fraction.toDouble())
+                ?.let { goToLocatorChannel.trySend(it) }
             return
         }
         val chapters = st.index?.chapters ?: return
@@ -227,9 +198,7 @@ class ReaderViewModel(
         if (loc != null) {
             goToLocatorChannel.trySend(loc)
             _uiState.update { it.copy(activeSheet = null) }
-        } else {
-            goToChapter(fallbackChapter, fallbackBlock)
-        }
+        } else goToChapter(fallbackChapter, fallbackBlock)
     }
 
     private suspend fun loadNativeChapter(
@@ -249,8 +218,7 @@ class ReaderViewModel(
         }
         res.fold(
             onSuccess = { loaded ->
-                lastSavedBlock = targetBlockIndex
-                lastSavedCharOffset = targetCharOffset
+                lastSavedBlock = targetBlockIndex; lastSavedCharOffset = targetCharOffset
                 val total = index.chapters.size.coerceAtLeast(1)
                 _uiState.update {
                     it.copy(
@@ -283,55 +251,35 @@ class ReaderViewModel(
 
     fun toggleChrome() = _uiState.update { it.copy(showChrome = !it.showChrome) }
     fun openSheet(sheet: ReaderSheet?) = _uiState.update { it.copy(activeSheet = sheet) }
+    fun setParagraphMenu(pair: Pair<Int, String>?) = _uiState.update { it.copy(longPressParagraph = pair) }
     fun consumeStatusMessage() = _uiState.update { it.copy(statusMessage = null) }
-
-    fun toggleBookmark() {
-        val st = _uiState.value
-        val snippet = if (st.readiumPublication != null) {
-            container.readiumEngine.parseLocator(st.currentLocatorJson)?.text?.highlight?.ifBlank { null } ?: st.currentChapterTitle
-        } else {
-            val blk = st.chapter?.blocks?.firstOrNull { it.index >= st.visibleBlockIndex && !it.speakableText.isNullOrBlank() }
-            blk?.speakableText ?: st.chapter?.title ?: return
-        }
-        val added = container.bookLibrary.toggleBookmark(
-            bookId, st.currentChapterIndex, st.visibleBlockIndex, st.currentChapterTitle, snippet, st.currentLocatorJson
-        )
-        _uiState.update { it.copy(statusMessage = if (added) "已添加书签" else "已取消当前位置书签") }
-    }
-
-    fun removeBookmark(id: String) = container.bookLibrary.removeBookmark(bookId, id)
-
-    fun createHighlight(quote: String, locatorJson: String, colorHex: Long, openNote: Boolean) {
-        val item = BookHighlight(
-            id = UUID.randomUUID().toString().take(8),
-            chapterIndex = _uiState.value.currentChapterIndex,
-            locatorJson = locatorJson,
-            quote = quote.take(300),
-            colorHex = colorHex,
-            createdAt = System.currentTimeMillis()
-        )
-        container.bookLibrary.addHighlight(bookId, item)
-        _uiState.update { it.copy(editingHighlight = if (openNote) item else null, statusMessage = if (openNote) null else "已添加划线高亮") }
-    }
-
-    fun handleHighlightAction(editNoteTarget: BookHighlight?, saveId: String? = null, saveNote: String = "", removeId: String? = null) {
-        when {
-            removeId != null -> container.bookLibrary.removeHighlight(bookId, removeId)
-            saveId != null -> {
-                container.bookLibrary.updateHighlightNote(bookId, saveId, saveNote)
-                _uiState.update { it.copy(editingHighlight = null, statusMessage = "笔记已保存") }
-            }
-            else -> _uiState.update { it.copy(editingHighlight = editNoteTarget) }
-        }
-    }
 
     fun togglePlayPause() {
         val tts = container.readerTts.stateFlow.value
         if ((tts.isPlaying || tts.isSynthesizing) && tts.bookId == bookId) container.readerTts.stop()
         else ttsSearch.startTtsFromBlock(_uiState.value.visibleBlockIndex)
     }
+
     fun updateReaderSettings(transform: (ReaderSettings) -> ReaderSettings) =
         container.bookLibrary.updateSettings(transform(container.bookLibrary.settingsFlow.value))
+
+    fun resetReaderSettings() {
+        container.bookLibrary.updateSettings(ReaderSettings.Default)
+        _uiState.update { it.copy(statusMessage = "已恢复默认排版设置") }
+    }
+
+    fun toggleDayNightQuick(appIsDark: Boolean) {
+        val cur = container.bookLibrary.settingsFlow.value
+        val curDark = when {
+            cur.customBgHex != 0L ->
+                androidx.core.graphics.ColorUtils.calculateLuminance(cur.customBgHex.toInt()) < 0.45
+            cur.paperTheme == ReaderPaperTheme.FOLLOW_APP -> appIsDark
+            else -> cur.paperTheme.isDark
+        }
+        val nextTheme = if (curDark) ReaderPaperTheme.CREAM else ReaderPaperTheme.NIGHT
+        updateReaderSettings { it.copy(paperTheme = nextTheme, customBgHex = 0L, customTextHex = 0L) }
+    }
+
     fun importCustomFont(uri: Uri) = container.bookLibrary.importCustomFont(uri).fold(
         onSuccess = { path ->
             updateReaderSettings { it.copy(customFontPath = path) }
@@ -339,8 +287,10 @@ class ReaderViewModel(
         },
         onFailure = { err -> _uiState.update { it.copy(statusMessage = "字体导入失败: ${err.message}") } }
     )
-    suspend fun loadBookImage(resourcePath: String): Bitmap? =
+
+    suspend fun loadBookImage(resourcePath: String) =
         _uiState.value.book?.let { container.epubImageLoader.loadBookResource(it, resourcePath) }
+
     override fun onCleared() { runCatching { _uiState.value.readiumPublication?.close() }; super.onCleared() }
 
     class Factory(private val container: AppContainer, private val bookId: String) : ViewModelProvider.Factory {

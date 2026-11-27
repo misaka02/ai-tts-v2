@@ -1,5 +1,6 @@
 package com.aitts.v2.ui.reader
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Brightness4
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FormatSize
 import androidx.compose.material.icons.outlined.Headphones
@@ -56,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aitts.v2.reader.BookImageItem
 import com.aitts.v2.reader.model.BookBookmark
 import com.aitts.v2.reader.model.BookHighlight
 import com.aitts.v2.reader.model.ChapterRef
@@ -120,6 +123,7 @@ fun ReaderBottomBar(
     onNextChapter: () -> Unit,
     onSeekProgression: (Float) -> Unit,
     onTogglePlay: () -> Unit,
+    onToggleDayNight: () -> Unit,
     onOpenToc: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenTtsSheet: () -> Unit,
@@ -144,7 +148,7 @@ fun ReaderBottomBar(
                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = if (dragging) {
-                            "跳转至第 $previewChapter / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
+                            "跳转至约第 $previewChapter / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
                         } else {
                             "第 ${chapterIndex + 1} / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
                         },
@@ -153,14 +157,8 @@ fun ReaderBottomBar(
                     )
                     Slider(
                         value = displayFraction,
-                        onValueChange = {
-                            dragging = true
-                            dragFraction = it
-                        },
-                        onValueChangeFinished = {
-                            dragging = false
-                            onSeekProgression(dragFraction)
-                        },
+                        onValueChange = { dragging = true; dragFraction = it },
+                        onValueChangeFinished = { dragging = false; onSeekProgression(dragFraction) },
                         modifier = Modifier.fillMaxWidth().height(28.dp)
                     )
                 }
@@ -169,12 +167,15 @@ fun ReaderBottomBar(
                 }
             }
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 IconButton(onClick = onOpenToc) {
-                    Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = "目录、书签与笔记")
+                    Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = "目录、书签、笔记与插图")
+                }
+                IconButton(onClick = onToggleDayNight) {
+                    Icon(Icons.Outlined.Brightness4, contentDescription = "快捷切换日夜模式")
                 }
                 IconButton(onClick = onOpenAppearance) {
                     Icon(Icons.Outlined.FormatSize, contentDescription = "排版与亮度")
@@ -183,18 +184,18 @@ fun ReaderBottomBar(
                     when {
                         isSynthesizing -> {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("准备朗读...")
+                            Spacer(Modifier.width(6.dp))
+                            Text("准备朗读")
                         }
                         isPlaying -> {
                             Icon(Icons.Outlined.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("暂停听书")
+                            Spacer(Modifier.width(4.dp))
+                            Text("暂停")
                         }
                         else -> {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("AI 听书")
+                            Spacer(Modifier.width(4.dp))
+                            Text("听书")
                         }
                     }
                 }
@@ -213,29 +214,34 @@ fun ReaderTocSheet(
     currentChapterIndex: Int,
     bookmarks: List<BookBookmark>,
     highlights: List<BookHighlight>,
+    images: List<BookImageItem>,
+    isExportingImages: Boolean,
+    imageExportProgress: String,
+    loadThumbnail: suspend (String) -> Bitmap?,
     onSelectChapter: (Int) -> Unit,
     onSelectBookmark: (BookBookmark) -> Unit,
     onRemoveBookmark: (String) -> Unit,
     onSelectHighlight: (BookHighlight) -> Unit,
     onEditHighlightNote: (BookHighlight) -> Unit,
     onRemoveHighlight: (String) -> Unit,
+    onSelectImage: (BookImageItem) -> Unit,
+    onExportAllImages: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tocListState = rememberLazyListState()
     LaunchedEffect(selectedTab, currentChapterIndex) {
         val activePos = chapters.indexOfFirst { it.index == currentChapterIndex }
-        if (selectedTab == 0 && activePos >= 0) {
-            tocListState.scrollToItem(activePos)
-        }
+        if (selectedTab == 0 && activePos >= 0) tocListState.scrollToItem(activePos)
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.background) {
-        Column(modifier = Modifier.fillMaxWidth().height(480.dp).navigationBarsPadding()) {
+        Column(modifier = Modifier.fillMaxWidth().height(500.dp).navigationBarsPadding()) {
             TabRow(selectedTabIndex = selectedTab) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("目录 (${chapters.size})") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("书签 (${bookmarks.size})") })
-                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("笔记 (${highlights.size})") })
+                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("目录(${chapters.size})") })
+                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("书签(${bookmarks.size})") })
+                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("笔记(${highlights.size})") })
+                Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("插图(${images.size})") })
             }
             when (selectedTab) {
                 0 -> LazyColumn(state = tocListState, modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -267,11 +273,20 @@ fun ReaderTocSheet(
                     onRemove = onRemoveBookmark,
                     modifier = Modifier.fillMaxWidth().weight(1f)
                 )
-                else -> HighlightListTab(
+                2 -> HighlightListTab(
                     highlights = highlights,
                     onSelect = onSelectHighlight,
                     onEditNote = onEditHighlightNote,
                     onRemove = onRemoveHighlight,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
+                else -> BookImageGalleryTab(
+                    images = images,
+                    isExporting = isExportingImages,
+                    exportProgressText = imageExportProgress,
+                    loadThumbnail = loadThumbnail,
+                    onSelectImage = onSelectImage,
+                    onExportAll = onExportAllImages,
                     modifier = Modifier.fillMaxWidth().weight(1f)
                 )
             }

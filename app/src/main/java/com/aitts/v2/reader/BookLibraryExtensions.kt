@@ -21,6 +21,16 @@ fun BookLibraryRepository.updateHighlightNote(bookId: String, highlightId: Strin
     }
 }
 
+fun BookLibraryRepository.updateHighlightColor(bookId: String, highlightId: String, colorHex: Long) {
+    mutateBook(bookId) { book ->
+        book.copy(
+            highlights = book.highlights.map { h ->
+                if (h.id == highlightId) h.copy(colorHex = colorHex) else h
+            }
+        )
+    }
+}
+
 fun BookLibraryRepository.removeHighlight(bookId: String, highlightId: String) {
     mutateBook(bookId) { book ->
         book.copy(highlights = book.highlights.filterNot { it.id == highlightId })
@@ -37,7 +47,12 @@ fun BookLibraryRepository.updateCategory(bookId: String, category: String) {
 
 fun BookLibraryRepository.importCustomFont(uri: Uri): Result<String> = runCatching {
     val fontsDir = File(rootDir, "fonts").apply { mkdirs() }
-    val outFile = File(fontsDir, "custom_${System.currentTimeMillis()}.ttf")
+    val rawName = runCatching {
+        appContext.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    }.getOrNull().orEmpty()
+    val ext = rawName.substringAfterLast('.', "").lowercase().takeIf { it in setOf("ttf", "otf", "woff", "woff2") } ?: "ttf"
+    val outFile = File(fontsDir, "custom_${System.currentTimeMillis()}.$ext")
     appContext.contentResolver.openInputStream(uri)?.use { input ->
         outFile.outputStream().use { output -> input.copyTo(output) }
     } ?: error("无法读取字体文件")

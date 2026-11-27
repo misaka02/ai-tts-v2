@@ -1,9 +1,13 @@
+@file:OptIn(org.readium.r2.shared.ExperimentalReadiumApi::class)
+
 package com.aitts.v2.reader
 
 import android.content.Context
-import androidx.compose.ui.graphics.toArgb
 import com.aitts.v2.reader.model.BookSearchHit
+import com.aitts.v2.reader.model.ReaderColumnCount
+import com.aitts.v2.reader.model.ReaderDirection
 import com.aitts.v2.reader.model.ReaderFontFamily
+import com.aitts.v2.reader.model.ReaderImageFilter
 import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderReadingMode
 import com.aitts.v2.reader.model.ReaderSettings
@@ -13,12 +17,16 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.Color as ReadiumColor
+import org.readium.r2.navigator.preferences.ColumnCount
 import org.readium.r2.navigator.preferences.FontFamily
+import org.readium.r2.navigator.preferences.ImageFilter
+import org.readium.r2.navigator.preferences.ReadingProgression
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.preferences.Theme
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.publication.services.search.search
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
@@ -27,6 +35,7 @@ import org.readium.r2.shared.util.toUrl
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 import java.io.File
+import java.net.URLDecoder
 
 data class ReadiumTocItem(
     val index: Int,
@@ -43,7 +52,7 @@ data class ReadiumSearchEntry(
 
 /**
  * Wraps Readium Kotlin Toolkit 3.0.0 (`AssetRetriever` + `PublicationOpener`)
- * for industrial EPUB 2/3 rendering, nested TOC extraction, full-text search, and preference mapping.
+ * for industrial EPUB 2/3 rendering, nested TOC extraction, positions, resource bytes, and preferences.
  */
 class ReadiumEngine(context: Context) {
 
@@ -70,6 +79,10 @@ class ReadiumEngine(context: Context) {
         Result.success(publication)
     }
 
+    suspend fun loadPositions(publication: Publication): List<Locator> = withContext(Dispatchers.IO) {
+        runCatching { publication.positions() }.getOrDefault(emptyList())
+    }
+
     fun extractTocItems(publication: Publication): List<ReadiumTocItem> {
         val out = mutableListOf<ReadiumTocItem>()
         fun walk(links: List<Link>, depth: Int) {
@@ -92,9 +105,7 @@ class ReadiumEngine(context: Context) {
             }
         }
         walk(publication.tableOfContents, depth = 0)
-        if (out.isEmpty()) {
-            walk(publication.readingOrder, depth = 0)
-        }
+        if (out.isEmpty()) walk(publication.readingOrder, depth = 0)
         return out
     }
 
@@ -130,6 +141,32 @@ class ReadiumEngine(context: Context) {
         results
     }
 
+    suspend fun readResourceBytes(publication: Publication, href: String): ByteArray? = withContext(Dispatchers.IO) {
+        val cleanTarget = normalizeHref(href)
+        if (cleanTarget.isEmpty()) return@withContext null
+        val allLinks = publication.resources + publication.readingOrder
+        val match = allLinks.firstOrNull { link ->
+            val linkHref = normalizeHref(link.href.toString())
+            linkHref == cleanTarget ||
+                linkHref.endsWith("/$cleanTarget") ||
+                cleanTarget.endsWith("/$linkHref")
+        } ?: return@withContext null
+        val resource = publication.get(match) ?: return@withContext null
+        try {
+            val len = resource.length().getOrNull() ?: 0L
+            if (len > MAX_RESOURCE_BYTES) return@withContext null
+            resource.read().getOrNull()?.takeIf { it.size.toLong() <= MAX_RESOURCE_BYTES }
+        } finally {
+            runCatching { resource.close() }
+        }
+    }
+
+    private fun normalizeHref(raw: String): String {
+        val noFrag = raw.trim().substringBefore('#').substringBefore('?')
+        val stripped = noFrag.removePrefix("https://readium/").removePrefix("http://readium/").trimStart('/')
+        return runCatching { URLDecoder.decode(stripped, "UTF-8") }.getOrDefault(stripped)
+    }
+
     fun resolveChapterIndex(publication: Publication, locator: Locator): Int {
         val targetPath = locator.href.toString().substringBefore('#')
         val idx = publication.readingOrder.indexOfFirst { link ->
@@ -144,7 +181,16 @@ class ReadiumEngine(context: Context) {
         return publication.locatorFromLink(link)
     }
 
-    fun locatorForProgression(publication: Publication, progression: Double): Locator? {
+    fun locatorForProgression(
+        publication: Publication,
+        positions: List<Locator>,
+        progression: Double
+    ): Locator? {
+        if (positions.isNotEmpty()) {
+            val clamped = progression.coerceIn(0.0, 0.9999)
+            val idx = (clamped * positions.size).toInt().coerceIn(0, positions.lastIndex)
+            return positions[idx]
+        }
         val order = publication.readingOrder
         if (order.isEmpty()) return null
         val clamped = progression.coerceIn(0.0, 0.999)
@@ -161,9 +207,78 @@ class ReadiumEngine(context: Context) {
         settings: ReaderSettings,
         appIsDark: Boolean,
         appBgArgb: Int,
-        appTextArgb: Int
+        appTextArgb: Int,
+        customFontFamilyName: String? = null
     ): EpubPreferences {
-        val (theme, bg, fg) = when (settings.paperTheme) {
+        val (theme, bg, fg) = resolveEpubThemeColors(settings, appIsDark, appBgArgb, appTextArgb)
+        val resolvedFont = when {
+            !customFontFamilyName.isNullOrBlank() -> FontFamily(customFontFamilyName)
+            settings.fontFamily == ReaderFontFamily.SERIF -> FontFamily.SERIF
+            settings.fontFamily == ReaderFontFamily.MONOSPACE -> FontFamily.MONOSPACE
+            else -> FontFamily.SANS_SERIF
+        }
+        val weightRatio = if (settings.fontWeight != 400) (settings.fontWeight / 400.0).coerceIn(0.5, 2.5) else null
+        val indentEm = settings.effectiveIndentEm().toDouble().coerceIn(0.0, 3.0)
+        return EpubPreferences(
+            theme = theme,
+            backgroundColor = bg,
+            textColor = fg,
+            fontFamily = resolvedFont,
+            fontSize = (settings.fontSizeSp / 16.0).coerceIn(0.75, 2.2),
+            fontWeight = weightRatio,
+            lineHeight = settings.lineHeightMultiplier.toDouble().coerceIn(1.1, 2.5),
+            pageMargins = (settings.horizontalPaddingDp / 20.0).coerceIn(0.4, 2.2),
+            paragraphSpacing = (settings.paragraphSpacingDp / 16.0).coerceIn(0.0, 2.0),
+            paragraphIndent = indentEm,
+            letterSpacing = settings.letterSpacingEm.toDouble().coerceIn(0.0, 1.0).takeIf { it > 0.005 },
+            wordSpacing = settings.wordSpacingEm.toDouble().coerceIn(0.0, 1.0).takeIf { it > 0.005 },
+            hyphens = settings.hyphens,
+            ligatures = settings.ligatures,
+            columnCount = when (settings.columnCount) {
+                ReaderColumnCount.ONE -> ColumnCount.ONE
+                ReaderColumnCount.TWO -> ColumnCount.TWO
+                ReaderColumnCount.AUTO -> ColumnCount.AUTO
+            },
+            verticalText = settings.verticalText,
+            readingProgression = when (settings.readingDirection) {
+                ReaderDirection.LTR -> ReadingProgression.LTR
+                ReaderDirection.RTL -> ReadingProgression.RTL
+                ReaderDirection.AUTO -> null
+            },
+            imageFilter = when (settings.nightImageFilter) {
+                ReaderImageFilter.DARKEN -> ImageFilter.DARKEN
+                ReaderImageFilter.INVERT -> ImageFilter.INVERT
+                ReaderImageFilter.NONE -> null
+            },
+            scroll = settings.readingMode == ReaderReadingMode.SCROLL,
+            publisherStyles = settings.publisherStyles,
+            textAlign = when (settings.textAlign) {
+                ReaderTextAlign.AUTO -> null
+                ReaderTextAlign.START -> TextAlign.START
+                ReaderTextAlign.JUSTIFY -> TextAlign.JUSTIFY
+                ReaderTextAlign.CENTER -> TextAlign.CENTER
+            }
+        )
+    }
+
+    private fun resolveEpubThemeColors(
+        settings: ReaderSettings,
+        appIsDark: Boolean,
+        appBgArgb: Int,
+        appTextArgb: Int
+    ): Triple<Theme, ReadiumColor, ReadiumColor> {
+        if (settings.customBgHex != 0L && settings.customTextHex != 0L) {
+            val bg = settings.customBgHex.toInt()
+            val fg = settings.customTextHex.toInt()
+            val lum = androidx.core.graphics.ColorUtils.calculateLuminance(bg)
+            val t = when {
+                lum < 0.35 -> Theme.DARK
+                lum > 0.90 -> Theme.LIGHT
+                else -> Theme.SEPIA
+            }
+            return Triple(t, ReadiumColor(bg), ReadiumColor(fg))
+        }
+        return when (settings.paperTheme) {
             ReaderPaperTheme.FOLLOW_APP -> Triple(
                 if (appIsDark) Theme.DARK else Theme.LIGHT,
                 ReadiumColor(appBgArgb),
@@ -185,19 +300,9 @@ class ReadiumEngine(context: Context) {
                 ReadiumColor(settings.paperTheme.textHex.toInt())
             )
         }
-        return EpubPreferences(
-            theme = theme,
-            backgroundColor = bg,
-            textColor = fg,
-            fontFamily = if (settings.fontFamily == ReaderFontFamily.SERIF) FontFamily.SERIF else FontFamily.SANS_SERIF,
-            fontSize = (settings.fontSizeSp / 16.0).coerceIn(0.75, 2.2),
-            lineHeight = settings.lineHeightMultiplier.toDouble().coerceIn(1.1, 2.5),
-            pageMargins = (settings.horizontalPaddingDp / 20.0).coerceIn(0.4, 2.0),
-            paragraphSpacing = (settings.paragraphSpacingDp / 16.0).coerceIn(0.0, 2.0),
-            letterSpacing = settings.letterSpacingEm.toDouble().takeIf { it > 0.01 },
-            scroll = settings.readingMode == ReaderReadingMode.SCROLL,
-            publisherStyles = settings.publisherStyles,
-            textAlign = if (settings.textAlign == ReaderTextAlign.JUSTIFY) TextAlign.JUSTIFY else TextAlign.START
-        )
+    }
+
+    companion object {
+        private const val MAX_RESOURCE_BYTES = 32L * 1024 * 1024
     }
 }

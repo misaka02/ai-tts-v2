@@ -8,10 +8,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -33,16 +31,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aitts.v2.reader.model.ChapterContent
-import com.aitts.v2.reader.model.ReaderFontFamily
 import com.aitts.v2.reader.model.ReaderSettings
+import com.aitts.v2.reader.model.ReaderTapZoneMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 /**
- * Horizontal page-turning reader viewport supporting 3-zone tap navigation,
+ * Horizontal page-turning reader viewport supporting configurable tap zones,
  * swipe page/chapter transitions, running header/footer, and live TTS page tracking.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -61,11 +58,11 @@ fun PagedReaderViewport(
     onConsumedPendingScroll: () -> Unit,
     onVisibleBlockChanged: (Int, Int) -> Unit,
     onTapCenter: () -> Unit,
-    onLongPressSpeak: (Int) -> Unit,
+    onLongPressBlock: (Int, String) -> Unit,
     onPrevChapter: (landOnLastPage: Boolean) -> Unit,
     onNextChapter: () -> Unit,
     loadImage: suspend (String) -> Bitmap?,
-    onImageClick: (Bitmap) -> Unit = {}
+    onImageClick: (String, Bitmap) -> Unit = { _, _ -> }
 ) {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
@@ -79,8 +76,11 @@ fun PagedReaderViewport(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        val headerPx = with(density) { 36.dp.roundToPx() }
-        val footerPx = with(density) { 32.dp.roundToPx() }
+        val headerDp = if (readerSettings.showHeaderBar) 28 else 0
+        val footerDp = if (readerSettings.showFooterBar) 28 else 0
+        val vertPadDp = readerSettings.verticalPaddingDp.coerceIn(4f, 40f)
+        val headerPx = with(density) { (headerDp + vertPadDp).dp.roundToPx() }
+        val footerPx = with(density) { (footerDp + vertPadDp).dp.roundToPx() }
         val horizPadPx = with(density) { (readerSettings.horizontalPaddingDp * 2f).dp.roundToPx() }
         val activeHighlightPadPx = with(density) { 16.dp.roundToPx() }
         val contentWidthPx = (constraints.maxWidth - horizPadPx - activeHighlightPadPx).coerceAtLeast(180)
@@ -113,10 +113,7 @@ fun PagedReaderViewport(
                 pendingScrollBlockIndex != null -> findPageForPosition(pages, pendingScrollBlockIndex, pendingScrollCharOffset)
                 else -> 0
             }
-            val pagerState = rememberPagerState(
-                initialPage = pageOffset + startRealPage,
-                pageCount = { totalPagerItems }
-            )
+            val pagerState = rememberPagerState(initialPage = pageOffset + startRealPage, pageCount = { totalPagerItems })
 
             LaunchedEffect(pages, pendingScrollBlockIndex, pendingScrollCharOffset, pendingLandOnLastPage) {
                 val targetBlock = pendingScrollBlockIndex ?: anchorBlockIndex
@@ -139,14 +136,8 @@ fun PagedReaderViewport(
 
             LaunchedEffect(pagerState.settledPage, pages.size) {
                 val settled = pagerState.settledPage
-                if (hasPrev && settled == 0) {
-                    onPrevChapter(true)
-                    return@LaunchedEffect
-                }
-                if (hasNext && settled == totalPagerItems - 1) {
-                    onNextChapter()
-                    return@LaunchedEffect
-                }
+                if (hasPrev && settled == 0) { onPrevChapter(true); return@LaunchedEffect }
+                if (hasNext && settled == totalPagerItems - 1) { onNextChapter(); return@LaunchedEffect }
                 val realIdx = (settled - pageOffset).coerceIn(0, pages.lastIndex)
                 val pageSlices = pages[realIdx].slices
                 val isTtsFollowPage = activeTtsBlockIndex >= 0 && pageSlices.any { it.blockIndex == activeTtsBlockIndex }
@@ -181,32 +172,18 @@ fun PagedReaderViewport(
                 }
             }
 
-            LaunchedEffect(pageTurnEvents, pages.size) {
-                pageTurnEvents.collect { delta -> turnPage(delta) }
-            }
+            LaunchedEffect(pageTurnEvents, pages.size) { pageTurnEvents.collect { delta -> turnPage(delta) } }
 
             val currentRealPage = (pagerState.currentPage - pageOffset).coerceIn(0, pages.lastIndex)
 
             Column(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .padding(horizontal = readerSettings.horizontalPaddingDp.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Text(
-                        text = chapter.title,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                if (readerSettings.showHeaderBar) {
+                    ReaderMiniHeaderBar(chapter.title, readerSettings.horizontalPaddingDp, colors.secondaryText)
                 }
 
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxWidth().weight(1f)
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = vertPadDp.dp)
                 ) { pagerIdx ->
                     val realIdx = pagerIdx - pageOffset
                     if (realIdx !in pages.indices) {
@@ -225,41 +202,51 @@ fun PagedReaderViewport(
                             colors = colors,
                             maxImageHeightDp = maxImageDp,
                             activeTtsBlockIndex = activeTtsBlockIndex,
-                            onTapZone = { fractionX ->
-                                when {
-                                    fractionX < 0.30f -> turnPage(-1)
-                                    fractionX > 0.70f -> turnPage(1)
-                                    else -> onTapCenter()
-                                }
-                            },
-                            onLongPressSpeak = onLongPressSpeak,
+                            onTapZone = { fx -> handleTapZone(readerSettings.tapZoneMode, fx, ::turnPage, onTapCenter) },
+                            onLongPressBlock = onLongPressBlock,
                             loadImage = loadImage,
                             onImageClick = onImageClick
                         )
                     }
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(32.dp)
-                        .padding(horizontal = readerSettings.horizontalPaddingDp.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "第 ${currentRealPage + 1} / ${pages.size} 页",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryText
-                    )
-                    Text(
-                        text = if (activeTtsBlockIndex >= 0) "朗读中 · $bookProgressPercent%" else "全书 $bookProgressPercent%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (activeTtsBlockIndex >= 0) colors.accent else colors.secondaryText
+                if (readerSettings.showFooterBar) {
+                    val leftText = "第 ${currentRealPage + 1}/${pages.size} 页"
+                    val rightText = if (activeTtsBlockIndex >= 0) "朗读中 · $bookProgressPercent%" else "全书 $bookProgressPercent%"
+                    ReaderMiniFooterBar(
+                        leftLabel = leftText,
+                        rightLabel = rightText,
+                        showBatteryTime = readerSettings.showBatteryTime,
+                        horizontalPaddingDp = readerSettings.horizontalPaddingDp,
+                        textColor = colors.secondaryText,
+                        accentColor = colors.accent,
+                        highlightRight = activeTtsBlockIndex >= 0
                     )
                 }
             }
         }
+    }
+}
+
+internal fun handleTapZone(
+    mode: ReaderTapZoneMode,
+    fractionX: Float,
+    turnPage: (Int) -> Unit,
+    onCenter: () -> Unit
+) {
+    when (mode) {
+        ReaderTapZoneMode.STANDARD -> when {
+            fractionX < 0.28f -> turnPage(-1)
+            fractionX > 0.72f -> turnPage(1)
+            else -> onCenter()
+        }
+        ReaderTapZoneMode.LEFT_HAND -> when {
+            fractionX < 0.28f -> turnPage(1)
+            fractionX > 0.72f -> turnPage(-1)
+            else -> onCenter()
+        }
+        ReaderTapZoneMode.ALL_NEXT -> turnPage(1)
+        ReaderTapZoneMode.SWIPE_ONLY -> onCenter()
     }
 }
 
@@ -272,9 +259,9 @@ private fun SingleBookPage(
     maxImageHeightDp: Int,
     activeTtsBlockIndex: Int,
     onTapZone: (Float) -> Unit,
-    onLongPressSpeak: (Int) -> Unit,
+    onLongPressBlock: (Int, String) -> Unit,
     loadImage: suspend (String) -> Bitmap?,
-    onImageClick: (Bitmap) -> Unit
+    onImageClick: (String, Bitmap) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -298,7 +285,7 @@ private fun SingleBookPage(
                 colors = colors,
                 maxImageHeightDp = maxImageHeightDp,
                 onTap = onTapZone,
-                onLongPress = { onLongPressSpeak(slice.blockIndex) },
+                onLongPress = { txt -> onLongPressBlock(slice.blockIndex, txt) },
                 loadImage = loadImage,
                 onImageClick = onImageClick
             )

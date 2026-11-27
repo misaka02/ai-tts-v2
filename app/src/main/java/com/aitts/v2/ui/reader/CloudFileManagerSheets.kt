@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -99,30 +100,101 @@ fun FileNodeRow(
 
 @Composable
 fun GoogleDriveAuthCard(
+    clientId: String,
+    clientSecret: String,
     errorMessage: String?,
     isBusy: Boolean,
+    isBrowserWaiting: Boolean,
+    packageName: String,
+    signingSha1: String,
+    onUpdateClient: (String?, String?) -> Unit,
+    onImportJson: () -> Unit,
+    onBrowserSignIn: () -> Unit,
+    onCancelBrowserSignIn: () -> Unit,
     onOneTapSignIn: () -> Unit,
+    onCopySigningInfo: () -> Unit,
     onOpenSafPicker: () -> Unit,
     onOpenDevTokenSheet: () -> Unit
 ) {
+    var showManualClient by remember { mutableStateOf(false) }
+    var showSignInfo by remember { mutableStateOf(false) }
+
     InkPaperCard(padding = 16.dp) {
         Text("连接 Google 云端硬盘", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
-            text = "无需手动填写 Client ID。支持系统 Google 账号一键授权，或直接调起系统文件选择器无缝浏览已登录的 Google Drive App。",
+            text = "推荐导入个人 OAuth client_secret.json 后用浏览器一键授权（一次授权永久续期，不挑 GMS 与签名，支持 App 内代理）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (!errorMessage.isNullOrBlank()) {
             Text(errorMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
-        Button(onClick = onOneTapSignIn, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
-            Text("一键授权登录 Google 账号")
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onImportJson, enabled = !isBusy, modifier = Modifier.weight(1f)) {
+                Text("导入 client_secret.json")
+            }
+            TextButton(onClick = { showManualClient = !showManualClient }) {
+                Text(if (showManualClient) "收起凭证" else "手填 ID")
+            }
         }
-        OutlinedButton(onClick = onOpenSafPicker, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
-            Text("系统网盘直选批量导入 (零配置 SAF)")
+        if (showManualClient || clientId.isNotBlank()) {
+            Text(
+                text = if (clientId.isNotBlank()) "已就绪 Client ID: ${clientId.take(22)}..." else "请填入桌面端/Android OAuth Client ID",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
-        TextButton(onClick = onOpenDevTokenSheet, modifier = Modifier.fillMaxWidth()) {
-            Text("高级：使用手动 Access Token 连接")
+        if (showManualClient) {
+            OutlinedTextField(
+                value = clientId,
+                onValueChange = { onUpdateClient(it, null) },
+                label = { Text("OAuth Client ID") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = clientSecret,
+                onValueChange = { onUpdateClient(null, it) },
+                label = { Text("Client Secret (可选)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        if (isBrowserWaiting) {
+            OutlinedButton(onClick = onCancelBrowserSignIn, modifier = Modifier.fillMaxWidth()) {
+                Text("取消等待浏览器回调")
+            }
+        } else {
+            Button(onClick = onBrowserSignIn, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
+                Text("浏览器一键授权登录 (推荐/永久续期)")
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onOneTapSignIn, enabled = !isBusy, modifier = Modifier.weight(1f)) {
+                Text("Play 服务一键授权")
+            }
+            OutlinedButton(onClick = onOpenSafPicker, enabled = !isBusy, modifier = Modifier.weight(1f)) {
+                Text("系统网盘直选 (SAF)")
+            }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = { showSignInfo = !showSignInfo }) {
+                Text(if (showSignInfo) "隐藏 SHA-1 信息" else "Play 授权错误码 10 排查")
+            }
+            TextButton(onClick = onOpenDevTokenSheet) { Text("手动 Token 接入") }
+        }
+        if (showSignInfo) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("包名: $packageName", style = MaterialTheme.typography.labelSmall)
+                Text("SHA-1: $signingSha1", style = MaterialTheme.typography.labelSmall)
+                TextButton(onClick = onCopySigningInfo) { Text("一键复制包名与 SHA-1") }
+            }
         }
     }
 }
@@ -193,9 +265,7 @@ fun TextInputDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = {
-            OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(label) }, singleLine = true)
-        },
+        text = { OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(label) }, singleLine = true) },
         confirmButton = { TextButton(onClick = { onConfirm(value) }) { Text("确认") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
@@ -228,7 +298,7 @@ fun DevTokenConnectDialog(
         title = { Text("手动 Token 接入 (高级)") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("仅用于无 Google Play 服务环境的临时调试验证。", style = MaterialTheme.typography.bodySmall)
+                Text("仅用于已有短期 Access Token 的临时验证。", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = token,
                     onValueChange = onUpdateToken,

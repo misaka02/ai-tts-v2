@@ -29,6 +29,9 @@
 
 -keep class org.readium.** { *; }
 -dontwarn org.readium.**
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 -keep class com.google.android.gms.auth.** { *; }
 -dontwarn com.google.android.gms.**
 -dontwarn org.jsoup.**

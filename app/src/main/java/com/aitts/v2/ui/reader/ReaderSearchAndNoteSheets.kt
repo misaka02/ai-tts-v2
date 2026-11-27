@@ -1,6 +1,8 @@
 package com.aitts.v2.ui.reader
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -25,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,12 +120,83 @@ fun ReaderHighlightNoteDialog(
                 )
             }
         },
-        confirmButton = {
-            TextButton(onClick = { onSave(noteText) }) { Text("保存") }
+        confirmButton = { TextButton(onClick = { onSave(noteText) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+fun ReaderHighlightActionDialog(
+    highlight: BookHighlight,
+    onChangeColor: (Long) -> Unit,
+    onEditNote: () -> Unit,
+    onCopyQuote: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val swatches = listOf(0xFFFFD54FL, 0xFF81D4FAL, 0xFFA5D6A7L, 0xFFF48FB1L)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("划线操作") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "“${highlight.quote}”",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("颜色：", style = MaterialTheme.typography.labelMedium)
+                    swatches.forEach { hex ->
+                        val active = highlight.colorHex == hex
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(hex))
+                                .border(
+                                    width = if (active) 2.5.dp else 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.4f),
+                                    shape = CircleShape
+                                )
+                                .clickable { onChangeColor(hex) }
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onEditNote, modifier = Modifier.weight(1f)) { Text("写笔记") }
+                    OutlinedButton(onClick = onCopyQuote, modifier = Modifier.weight(1f)) { Text("复制") }
+                }
+            }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
+        confirmButton = {
+            TextButton(onClick = onDelete) { Text("删除划线", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
+}
+
+@Composable
+fun ReaderParagraphActionDialog(
+    text: String,
+    onSpeak: () -> Unit,
+    onCopy: () -> Unit,
+    onBookmark: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("段落操作") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(text, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(onClick = onSpeak, modifier = Modifier.fillMaxWidth()) { Text("从该段开始 AI 朗读") }
+                OutlinedButton(onClick = onCopy, modifier = Modifier.fillMaxWidth()) { Text("复制整段文字") }
+                OutlinedButton(onClick = onBookmark, modifier = Modifier.fillMaxWidth()) { Text("添加书签于此处") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }
 
@@ -134,7 +210,7 @@ fun HighlightListTab(
 ) {
     if (highlights.isEmpty()) {
         Column(modifier = modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("在 EPUB 正文长按划词后，可点击“黄高亮 / 蓝高亮 / 写笔记”记录摘录。", style = MaterialTheme.typography.bodyMedium)
+            Text("在 EPUB 正文长按划词后，可点击“高亮 / 写笔记”记录摘录。", style = MaterialTheme.typography.bodyMedium)
         }
         return
     }

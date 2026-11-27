@@ -29,14 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aitts.v2.reader.model.ChapterContent
 import com.aitts.v2.reader.model.ReaderBlock
-import com.aitts.v2.reader.model.ReaderFontFamily
-import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderSettings
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -52,11 +48,11 @@ fun ReaderContentViewport(
     onConsumedPendingScroll: () -> Unit,
     onVisibleBlockChanged: (Int, Int) -> Unit,
     onTapBody: () -> Unit,
-    onLongPressSpeak: (Int) -> Unit,
+    onLongPressBlock: (Int, String) -> Unit,
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
     loadImage: suspend (String) -> Bitmap?,
-    onImageClick: (Bitmap) -> Unit = {}
+    onImageClick: (String, Bitmap) -> Unit = { _, _ -> }
 ) {
     LaunchedEffect(chapter.chapterIndex, pendingScrollBlockIndex) {
         val targetBlock = pendingScrollBlockIndex ?: return@LaunchedEffect
@@ -83,12 +79,12 @@ fun ReaderContentViewport(
         val itemIdx = blockPos + 1
         val visible = listState.layoutInfo.visibleItemsInfo
         val alreadyWellPositioned = visible.any { it.index == itemIdx && it.offset >= 60 && it.offset < 700 }
-        if (!alreadyWellPositioned) {
-            listState.animateScrollToItem(itemIdx, scrollOffset = -120)
-        }
+        if (!alreadyWellPositioned) listState.animateScrollToItem(itemIdx, scrollOffset = -120)
     }
 
     val fontFamily = rememberResolvedReaderFontFamily(readerSettings)
+    val vertPadDp = readerSettings.verticalPaddingDp.coerceIn(4f, 40f)
+    val indentEm = readerSettings.effectiveIndentEm()
 
     LazyColumn(
         state = listState,
@@ -99,8 +95,8 @@ fun ReaderContentViewport(
         contentPadding = PaddingValues(
             start = readerSettings.horizontalPaddingDp.dp,
             end = readerSettings.horizontalPaddingDp.dp,
-            top = 24.dp,
-            bottom = 84.dp
+            top = vertPadDp.dp,
+            bottom = (vertPadDp + 64f).dp
         ),
         verticalArrangement = Arrangement.spacedBy(readerSettings.paragraphSpacingDp.dp)
     ) {
@@ -111,7 +107,7 @@ fun ReaderContentViewport(
                     style = MaterialTheme.typography.titleLarge,
                     fontFamily = fontFamily,
                     color = colors.text,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight((readerSettings.fontWeight + 200).coerceIn(600, 900))
                 )
                 Spacer(Modifier.height(6.dp))
                 HorizontalDivider(color = colors.secondaryText.copy(alpha = 0.25f))
@@ -119,10 +115,14 @@ fun ReaderContentViewport(
         }
 
         itemsIndexed(chapter.blocks, key = { idx, blk -> "${chapter.chapterIndex}_${blk.index}_$idx" }) { _, block ->
+            val indentPrefix = when {
+                indentEm >= 1.5f -> "\u3000\u3000"
+                indentEm >= 0.5f -> "\u3000"
+                else -> ""
+            }
             val displayText = when (block) {
                 is ReaderBlock.Heading -> block.text
-                is ReaderBlock.Paragraph ->
-                    if (readerSettings.firstLineIndent && !block.isQuote) "\u3000\u3000${block.text}" else block.text
+                is ReaderBlock.Paragraph -> if (!block.isQuote) indentPrefix + block.text else block.text
                 else -> ""
             }
             ReaderBlockItemView(
@@ -134,7 +134,7 @@ fun ReaderContentViewport(
                 colors = colors,
                 maxImageHeightDp = 420,
                 onTap = { onTapBody() },
-                onLongPress = { onLongPressSpeak(block.index) },
+                onLongPress = { txt -> onLongPressBlock(block.index, txt) },
                 loadImage = loadImage,
                 onImageClick = onImageClick
             )

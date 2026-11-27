@@ -22,7 +22,8 @@ enum class ReaderPaperTheme(
 @Serializable
 enum class ReaderFontFamily(val displayName: String) {
     SERIF("衬线宋体"),
-    SANS("无衬线体")
+    SANS("无衬线体"),
+    MONOSPACE("等宽字体")
 }
 
 @Serializable
@@ -33,8 +34,39 @@ enum class ReaderReadingMode(val displayName: String) {
 
 @Serializable
 enum class ReaderTextAlign(val displayName: String) {
+    AUTO("跟随原书"),
     START("左对齐"),
-    JUSTIFY("两端对齐")
+    JUSTIFY("两端对齐"),
+    CENTER("居中")
+}
+
+@Serializable
+enum class ReaderColumnCount(val displayName: String) {
+    AUTO("自动"),
+    ONE("单栏"),
+    TWO("双栏")
+}
+
+@Serializable
+enum class ReaderDirection(val displayName: String) {
+    AUTO("自动"),
+    LTR("从左到右"),
+    RTL("从右到左")
+}
+
+@Serializable
+enum class ReaderImageFilter(val displayName: String) {
+    NONE("原图"),
+    DARKEN("夜间变暗"),
+    INVERT("反色")
+}
+
+@Serializable
+enum class ReaderTapZoneMode(val displayName: String) {
+    STANDARD("标准左退右进"),
+    LEFT_HAND("左手左进右退"),
+    ALL_NEXT("点击均下一页"),
+    SWIPE_ONLY("仅滑动翻页")
 }
 
 @Serializable
@@ -56,5 +88,32 @@ data class ReaderSettings(
     val publisherStyles: Boolean = false,
     val textAlign: ReaderTextAlign = ReaderTextAlign.START,
     val letterSpacingEm: Float = 0f,
-    val customFontPath: String = ""
-)
+    val customFontPath: String = "",
+    val fontWeight: Int = 400,
+    val verticalPaddingDp: Float = 16f,
+    val wordSpacingEm: Float = 0f,
+    val paragraphIndentEm: Float = -1f,
+    val hyphens: Boolean = false,
+    val ligatures: Boolean = true,
+    val columnCount: ReaderColumnCount = ReaderColumnCount.AUTO,
+    val verticalText: Boolean = false,
+    val readingDirection: ReaderDirection = ReaderDirection.AUTO,
+    val nightImageFilter: ReaderImageFilter = ReaderImageFilter.NONE,
+    val tapZoneMode: ReaderTapZoneMode = ReaderTapZoneMode.STANDARD,
+    val invertVolumeKeys: Boolean = false,
+    val showHeaderBar: Boolean = true,
+    val showFooterBar: Boolean = true,
+    val showBatteryTime: Boolean = true,
+    val customBgHex: Long = 0L,
+    val customTextHex: Long = 0L
+) {
+    fun effectiveIndentEm(): Float = when {
+        paragraphIndentEm >= 0f -> paragraphIndentEm
+        firstLineIndent -> 2f
+        else -> 0f
+    }
+
+    companion object {
+        val Default = ReaderSettings()
+    }
+}

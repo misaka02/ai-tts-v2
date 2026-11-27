@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.ProviderDescriptorRegistry
 import com.aitts.v2.model.TtsProviderConfig
+import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.ui.theme.InkPaperCard
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -34,6 +35,7 @@ import com.aitts.v2.ui.theme.InkPaperCard
 fun ReaderTtsSheet(
     activeProvider: TtsProviderConfig,
     providers: List<TtsProviderConfig>,
+    readerSettings: ReaderSettings,
     isPlayingOrSynthesizing: Boolean,
     sleepActive: Boolean,
     sleepRemainingSec: Int,
@@ -43,6 +45,7 @@ fun ReaderTtsSheet(
     onPitchChange: (Float) -> Unit,
     onSetSleepTimer: (Int) -> Unit,
     onToggleSubtitle: (Boolean) -> Unit,
+    onUpdateReaderSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
     onStopTts: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -115,14 +118,13 @@ fun ReaderTtsSheet(
                         )
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("悬浮实时字幕", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = floatingSubtitleEnabled, onCheckedChange = onToggleSubtitle)
+                TtsToggleLine("听书自动滚屏/翻页高亮", readerSettings.autoScrollOnTts) { on ->
+                    onUpdateReaderSettings { it.copy(autoScrollOnTts = on) }
                 }
+                TtsToggleLine("章节结束自动连播下一章", readerSettings.autoNextChapterOnTts) { on ->
+                    onUpdateReaderSettings { it.copy(autoNextChapterOnTts = on) }
+                }
+                TtsToggleLine("悬浮实时字幕", floatingSubtitleEnabled, onToggleSubtitle)
             }
 
             if (isPlayingOrSynthesizing) {
@@ -131,5 +133,17 @@ fun ReaderTtsSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TtsToggleLine(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

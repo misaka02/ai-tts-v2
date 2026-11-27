@@ -4,7 +4,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.aitts.v2.reader.model.ReaderPaperTheme
+import com.aitts.v2.reader.model.ReaderSettings
 
 data class ResolvedReaderColors(
     val background: Color,
@@ -15,10 +17,21 @@ data class ResolvedReaderColors(
 )
 
 @Composable
-fun rememberReaderColors(paperTheme: ReaderPaperTheme): ResolvedReaderColors {
+fun rememberReaderColors(settings: ReaderSettings): ResolvedReaderColors {
     val scheme = MaterialTheme.colorScheme
-    return remember(paperTheme, scheme) {
-        if (paperTheme == ReaderPaperTheme.FOLLOW_APP) {
+    return remember(settings.paperTheme, settings.customBgHex, settings.customTextHex, scheme) {
+        if (settings.customBgHex != 0L && settings.customTextHex != 0L) {
+            val bg = Color(settings.customBgHex)
+            val fg = Color(settings.customTextHex)
+            val isDark = bg.luminance() < 0.45f
+            ResolvedReaderColors(
+                background = bg,
+                text = fg,
+                secondaryText = fg.copy(alpha = 0.65f),
+                highlightBg = if (isDark) Color(0x336AA0D4L) else Color(0x1F26537CL),
+                accent = scheme.primary
+            )
+        } else if (settings.paperTheme == ReaderPaperTheme.FOLLOW_APP) {
             ResolvedReaderColors(
                 background = scheme.background,
                 text = scheme.onBackground,
@@ -28,10 +41,10 @@ fun rememberReaderColors(paperTheme: ReaderPaperTheme): ResolvedReaderColors {
             )
         } else {
             ResolvedReaderColors(
-                background = Color(paperTheme.bgHex),
-                text = Color(paperTheme.textHex),
-                secondaryText = Color(paperTheme.secondaryTextHex),
-                highlightBg = Color(paperTheme.highlightHex),
+                background = Color(settings.paperTheme.bgHex),
+                text = Color(settings.paperTheme.textHex),
+                secondaryText = Color(settings.paperTheme.secondaryTextHex),
+                highlightBg = Color(settings.paperTheme.highlightHex),
                 accent = scheme.primary
             )
         }

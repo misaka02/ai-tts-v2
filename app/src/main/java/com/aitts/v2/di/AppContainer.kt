@@ -21,11 +21,13 @@ import com.aitts.v2.engine.provider.DiscoveryDiskCache
 import com.aitts.v2.engine.provider.TtsProviderRegistry
 import com.aitts.v2.engine.synthesis.SynthesisOrchestrator
 import com.aitts.v2.offline.PlatformOfflineBackend
+import com.aitts.v2.reader.BookImageExportHelper
 import com.aitts.v2.reader.BookImportManager
 import com.aitts.v2.reader.BookLibraryRepository
 import com.aitts.v2.reader.EpubImageLoader
 import com.aitts.v2.reader.GoogleDriveRepository
 import com.aitts.v2.reader.LibrarySyncEngine
+import com.aitts.v2.reader.LocalFontHttpServer
 import com.aitts.v2.reader.LocalSyncFolderManager
 import com.aitts.v2.reader.ReadiumEngine
 import com.aitts.v2.reader.ReaderTtsController
@@ -118,6 +120,7 @@ class AppContainer(context: Context) {
     val bookLibrary = BookLibraryRepository(appContext)
     val bookImportManager = BookImportManager(appContext, bookLibrary)
     val readiumEngine = ReadiumEngine(appContext)
+    val localFontServer = LocalFontHttpServer()
     val googleDriveClient = GoogleDriveClient(httpManager)
     val webDavClient = WebDavClient(httpManager)
     val googleDrive = GoogleDriveRepository(appContext, secretStore, googleDriveClient, bookImportManager)
@@ -125,6 +128,7 @@ class AppContainer(context: Context) {
     val localSyncFolder = LocalSyncFolderManager(appContext, bookImportManager)
     val syncEngine = LibrarySyncEngine(appContext, bookLibrary, localSyncFolder, googleDrive, webDav)
     val epubImageLoader = EpubImageLoader(bookLibrary)
+    val bookImageExporter = BookImageExportHelper(appContext, bookLibrary, readiumEngine)
     val readerTts = ReaderTtsController(
         context = appContext,
         orchestrator = orchestrator,

@@ -1,6 +1,5 @@
 package com.aitts.v2.ui.reader
 
-import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -17,9 +16,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,10 +28,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -47,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderReadingMode
+import com.aitts.v2.reader.model.ReaderTapZoneMode
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -71,9 +71,8 @@ fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     val pageTurnChannel = remember { Channel<Int>(capacity = 4) }
     val pageTurnEvents = remember(pageTurnChannel) { pageTurnChannel.receiveAsFlow() }
-    var lightboxBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    val colors = rememberReaderColors(readerSettings.paperTheme)
+    val colors = rememberReaderColors(readerSettings)
     val appDefaultIsDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
@@ -102,10 +101,10 @@ fun ReaderScreen(
         }
     }
 
-    val chromeBg = if (readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP) {
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)
-    } else {
-        Color(readerSettings.paperTheme.bgHex).copy(alpha = 0.97f)
+    val chromeBg = when {
+        readerSettings.customBgHex != 0L -> Color(readerSettings.customBgHex).copy(alpha = 0.97f)
+        readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP -> MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)
+        else -> Color(readerSettings.paperTheme.bgHex).copy(alpha = 0.97f)
     }
 
     Box(
@@ -117,40 +116,50 @@ fun ReaderScreen(
             .onPreviewKeyEvent { ev ->
                 val canPage = readerSettings.readingMode == ReaderReadingMode.PAGED && readerSettings.volumeKeyPaging
                 if (!canPage || state.activeSheet != null || ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val upStep = if (readerSettings.invertVolumeKeys) 1 else -1
                 when (ev.key) {
-                    Key.VolumeUp -> { pageTurnChannel.trySend(-1); true }
-                    Key.VolumeDown -> { pageTurnChannel.trySend(1); true }
+                    Key.VolumeUp -> { pageTurnChannel.trySend(upStep); true }
+                    Key.VolumeDown -> { pageTurnChannel.trySend(-upStep); true }
                     else -> false
                 }
             }
     ) {
         val ready = book != null && (pub != null || (chapter != null && index != null))
+        val errMsg = state.errorMessage
         when {
             state.isLoading && !ready -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            state.errorMessage != null && !ready -> Column(
+            errMsg != null && !ready -> Column(
                 modifier = Modifier.align(Alignment.Center).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(state.errorMessage ?: "无法打开书籍", color = colors.text)
+                Text(errMsg, color = colors.text)
                 Button(onClick = onBack) { Text("返回书架") }
             }
-            ready && book != null -> {
+            book != null && (pub != null || (chapter != null && index != null)) -> {
                 if (pub != null) {
                     ReadiumEpubViewport(
                         bookId = book.id,
                         publication = pub,
                         readiumEngine = viewModel.readiumEngine,
+                        localFontServer = viewModel.localFontServer,
                         initialLocator = state.readiumInitialLocator,
                         readerSettings = readerSettings,
                         colors = colors,
                         highlights = book.highlights,
+                        chapterTitle = state.currentChapterTitle,
+                        positionIndex = state.currentPositionIndex,
+                        positionsTotal = state.readiumPositions.size,
+                        totalProgression = state.currentProgression,
+                        isTtsActive = activeTtsForBook,
                         activeTtsSentence = if (activeTtsForBook) ttsState.activeSentenceText else "",
                         pageTurnEvents = pageTurnEvents,
                         goToLocatorEvents = viewModel.goToLocatorEvents,
                         onLocatorChanged = viewModel::onReadiumLocatorChanged,
                         onTapCenter = viewModel::toggleChrome,
-                        onCreateHighlight = viewModel::createHighlight,
+                        onCreateHighlight = viewModel.annotations::createHighlight,
+                        onHighlightTapped = { hid -> viewModel.annotations.handleHighlightAction(tappedId = hid) },
+                        onImageTapped = viewModel.media::openImageLightbox,
                         onSpeakSelection = viewModel.ttsSearch::startTtsFromReadium,
                         onSearchSelection = { q ->
                             viewModel.openSheet(ReaderSheet.SEARCH)
@@ -173,11 +182,11 @@ fun ReaderScreen(
                             onConsumedPendingScroll = viewModel::consumePendingScroll,
                             onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
                             onTapCenter = viewModel::toggleChrome,
-                            onLongPressSpeak = viewModel.ttsSearch::startTtsFromBlock,
+                            onLongPressBlock = { idx, txt -> viewModel.setParagraphMenu(idx to txt) },
                             onPrevChapter = { landLast -> viewModel.stepChapter(-1, landLast) },
                             onNextChapter = { viewModel.stepChapter(1, false) },
                             loadImage = viewModel::loadBookImage,
-                            onImageClick = { lightboxBitmap = it }
+                            onImageClick = { path, _ -> viewModel.media.openImageLightbox(path) }
                         )
                     } else {
                         ReaderContentViewport(
@@ -191,11 +200,11 @@ fun ReaderScreen(
                             onConsumedPendingScroll = viewModel::consumePendingScroll,
                             onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
                             onTapBody = viewModel::toggleChrome,
-                            onLongPressSpeak = viewModel.ttsSearch::startTtsFromBlock,
+                            onLongPressBlock = { idx, txt -> viewModel.setParagraphMenu(idx to txt) },
                             onPrevChapter = { viewModel.stepChapter(-1) },
                             onNextChapter = { viewModel.stepChapter(1) },
                             loadImage = viewModel::loadBookImage,
-                            onImageClick = { lightboxBitmap = it }
+                            onImageClick = { path, _ -> viewModel.media.openImageLightbox(path) }
                         )
                     }
                 }
@@ -225,6 +234,22 @@ fun ReaderScreen(
                     }
                 }
 
+                val showCornerMenu = !state.showChrome &&
+                    (readerSettings.tapZoneMode == ReaderTapZoneMode.ALL_NEXT ||
+                        readerSettings.tapZoneMode == ReaderTapZoneMode.SWIPE_ONLY)
+                if (showCornerMenu) {
+                    Surface(
+                        shape = CircleShape,
+                        color = chromeBg.copy(alpha = 0.78f),
+                        contentColor = colors.text,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 36.dp, end = 12.dp)
+                    ) {
+                        IconButton(onClick = viewModel::toggleChrome) {
+                            Icon(Icons.Outlined.Tune, contentDescription = "打开阅读菜单")
+                        }
+                    }
+                }
+
                 val totalChaps = pub?.readingOrder?.size ?: index?.chapters?.size ?: 1
                 AnimatedVisibility(
                     visible = state.showChrome,
@@ -246,7 +271,7 @@ fun ReaderScreen(
                         chromeBg = chromeBg,
                         chromeText = colors.text,
                         onBack = onBack,
-                        onToggleBookmark = viewModel::toggleBookmark,
+                        onToggleBookmark = { viewModel.annotations.toggleBookmark() },
                         onOpenSearch = { viewModel.openSheet(ReaderSheet.SEARCH) }
                     )
                 }
@@ -269,6 +294,7 @@ fun ReaderScreen(
                         onNextChapter = { viewModel.stepChapter(1) },
                         onSeekProgression = viewModel::seekByProgression,
                         onTogglePlay = viewModel::togglePlayPause,
+                        onToggleDayNight = { viewModel.toggleDayNightQuick(appDefaultIsDark) },
                         onOpenToc = { viewModel.openSheet(ReaderSheet.TOC) },
                         onOpenAppearance = { viewModel.openSheet(ReaderSheet.APPEARANCE) },
                         onOpenTtsSheet = { viewModel.openSheet(ReaderSheet.TTS) }
@@ -287,8 +313,6 @@ fun ReaderScreen(
         providers = providers,
         activeProvider = activeProvider,
         sleepActive = sleepActive,
-        sleepSec = sleepSec,
-        lightboxBitmap = lightboxBitmap,
-        onDismissLightbox = { lightboxBitmap = null }
+        sleepSec = sleepSec
     )
 }

@@ -74,7 +74,10 @@ fun CloudFileManagerScreen(
     var showSortMenu by remember { mutableStateOf(false) }
 
     val authLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
-        if (activity != null) viewModel.auth.handleGoogleAuthResult(activity, res.data)
+        if (activity != null) viewModel.auth.handleGoogleAuthResult(activity, res.resultCode, res.data)
+    }
+    val jsonPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { viewModel.auth.importClientSecretJson(context, it) }
     }
     val safMultiPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.importMultiViaSaf(uris) { rec -> rec?.let { onBookImported(it.id) } }
@@ -150,14 +153,25 @@ fun CloudFileManagerScreen(
                             }
                         }
                         FileSourceTab.GOOGLE_DRIVE -> if (!state.driveConnected) {
+                            val (pkgName, sha1) = remember { viewModel.auth.getPackageAndSha1Info() }
                             GoogleDriveAuthCard(
+                                clientId = state.devClientId,
+                                clientSecret = state.devClientSecret,
                                 errorMessage = state.errorMessage,
                                 isBusy = state.isBusy,
+                                isBrowserWaiting = state.isBrowserAuthWaiting,
+                                packageName = pkgName,
+                                signingSha1 = sha1,
+                                onUpdateClient = { id, sec -> viewModel.auth.updateDevInputs(cid = id, sec = sec) },
+                                onImportJson = { jsonPicker.launch(arrayOf("application/json", "*/*")) },
+                                onBrowserSignIn = { viewModel.auth.startBrowserPkceGoogleAuth(context) },
+                                onCancelBrowserSignIn = viewModel.auth::cancelBrowserPkceAuth,
                                 onOneTapSignIn = {
                                     if (activity != null) {
                                         viewModel.auth.startOneTapGoogleAuth(activity) { authLauncher.launch(it) }
                                     }
                                 },
+                                onCopySigningInfo = { viewModel.auth.copyPackageAndSha1(context) },
                                 onOpenSafPicker = { safMultiPicker.launch(arrayOf("*/*")) },
                                 onOpenDevTokenSheet = { viewModel.auth.setDevAuthSheet(true) }
                             )

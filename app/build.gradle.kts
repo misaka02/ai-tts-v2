@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
+}
+
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun buildSecretField(envKey: String, propKey: String): String {
+    val raw = System.getenv(envKey)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: localProps.getProperty(propKey)?.trim().orEmpty()
+    val escaped = raw.replace("\\", "\\\\").replace("\"", "\\\"")
+    return "\"$escaped\""
 }
 
 android {
@@ -15,6 +29,8 @@ android {
         targetSdk = 34
         versionCode = 200
         versionName = "2.0.0"
+
+        buildConfigField("String", "GDRIVE_DEFAULT_CLIENT_ID", buildSecretField("AITTS_GDRIVE_CLIENT_ID", "aitts.gdrive.clientId"))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
