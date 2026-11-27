@@ -37,8 +37,24 @@ android {
         }
     }
 
+    signingConfigs {
+        val keystorePath = System.getenv("AITTS_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+        val storePass = System.getenv("AITTS_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+        val alias = System.getenv("AITTS_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+        val keyPass = System.getenv("AITTS_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+        if (keystorePath != null && storePass != null && alias != null && keyPass != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = storePass
+                keyAlias = alias
+                keyPassword = keyPass
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

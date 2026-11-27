@@ -53,3 +53,12 @@ val qualityGate by tasks.registering {
         ":app:lintCloudDebug"
     )
 }
+
+val assembleR8Release by tasks.registering {
+    group = "build"
+    description = "Assemble R8-minified and resource-shrunk release APKs for both cloud and full flavors"
+    dependsOn(
+        ":app:assembleCloudRelease",
+        ":app:assembleFullRelease"
+    )
+}

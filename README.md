@@ -16,3 +16,11 @@
 python scripts/check_architecture.py
 ./gradlew qualityGate
 ```
+
+## R8 压缩构建
+
+默认生成经 R8 代码混淆裁剪、资源压缩与签名兜底（无环境变量配置正式 Keystore 时自动使用 debug 签名以便直接安装）的 `cloud` 与 `full` Release APK：
+
+```powershell
+.\gradlew.bat assembleR8Release
+```
