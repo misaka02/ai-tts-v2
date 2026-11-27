@@ -49,6 +49,8 @@ data class ReaderUiState(
     val errorMessage: String? = null,
     val visibleBlockIndex: Int = 0,
     val pendingScrollBlockIndex: Int? = null,
+    val pendingScrollCharOffset: Int = 0,
+    val pendingLandOnLastPage: Boolean = false,
     val showChrome: Boolean = false,
     val activeSheet: ReaderSheet? = null,
     val searchQuery: String = "",
@@ -78,7 +80,9 @@ class ReaderViewModel(
     val sleepActiveFlow: StateFlow<Boolean> = container.sleepTimer.isActiveFlow
     val sleepRemainingFlow: StateFlow<Int> = container.sleepTimer.remainingSecondsFlow
 
+    private var lastSavedChapter = -1
     private var lastSavedBlock = -1
+    private var lastSavedCharOffset = 0
     private var lastSavedTimeMs = 0L
     private var lastSyncedTtsChapter = -1
     private var searchJob: Job? = null
@@ -101,7 +105,8 @@ class ReaderViewModel(
             _uiState.update { it.copy(book = record, index = loadedIndex) }
             val startChap = record.progress.chapterIndex.coerceIn(0, (loadedIndex.chapters.size - 1).coerceAtLeast(0))
             val startBlock = record.progress.blockIndex.coerceAtLeast(0)
-            loadChapterInternal(record, loadedIndex, startChap, startBlock)
+            val startChar = record.progress.charOffset.coerceAtLeast(0)
+            loadChapterInternal(record, loadedIndex, startChap, startBlock, startChar)
         }
         viewModelScope.launch {
             container.bookLibrary.booksFlow.collect { books ->
@@ -135,27 +140,37 @@ class ReaderViewModel(
         }
     }
 
-    fun goToChapter(chapterIndex: Int, targetBlockIndex: Int = 0) {
+    fun goToChapter(chapterIndex: Int, targetBlockIndex: Int = 0, landOnLastPage: Boolean = false) {
         val state = _uiState.value
         val record = state.book ?: return
         val index = state.index ?: return
         if (chapterIndex !in index.chapters.indices) return
         viewModelScope.launch {
-            loadChapterInternal(record, index, chapterIndex, targetBlockIndex)
-            container.bookLibrary.updateProgress(bookId, chapterIndex, targetBlockIndex, index.chapters.size)
+            loadChapterInternal(record, index, chapterIndex, targetBlockIndex, 0, landOnLastPage)
+            if (!landOnLastPage) {
+                lastSavedChapter = chapterIndex
+                lastSavedBlock = targetBlockIndex
+                lastSavedCharOffset = 0
+                lastSavedTimeMs = System.currentTimeMillis()
+                container.bookLibrary.updateProgress(bookId, chapterIndex, targetBlockIndex, index.chapters.size, 0)
+            } else {
+                lastSavedChapter = -1
+            }
         }
     }
 
-    fun stepChapter(delta: Int) {
+    fun stepChapter(delta: Int, landOnLastPage: Boolean = false) {
         val cur = _uiState.value.chapter?.chapterIndex ?: return
-        goToChapter(cur + delta, 0)
+        goToChapter(cur + delta, 0, landOnLastPage)
     }
 
     private suspend fun loadChapterInternal(
         record: BookRecord,
         index: BookIndex,
         chapterIndex: Int,
-        targetBlockIndex: Int
+        targetBlockIndex: Int,
+        targetCharOffset: Int = 0,
+        landOnLastPage: Boolean = false
     ) {
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         val res = withContext(Dispatchers.IO) {
@@ -168,12 +183,15 @@ class ReaderViewModel(
         res.fold(
             onSuccess = { loaded ->
                 lastSavedBlock = targetBlockIndex
+                lastSavedCharOffset = targetCharOffset
                 _uiState.update {
                     it.copy(
                         chapter = loaded,
                         isLoading = false,
                         visibleBlockIndex = targetBlockIndex,
                         pendingScrollBlockIndex = targetBlockIndex,
+                        pendingScrollCharOffset = targetCharOffset,
+                        pendingLandOnLastPage = landOnLastPage,
                         activeSheet = null
                     )
                 }
@@ -187,18 +205,25 @@ class ReaderViewModel(
     }
 
     fun consumePendingScroll() {
-        _uiState.update { it.copy(pendingScrollBlockIndex = null) }
+        _uiState.update {
+            it.copy(pendingScrollBlockIndex = null, pendingScrollCharOffset = 0, pendingLandOnLastPage = false)
+        }
     }
 
-    fun onVisibleBlockChanged(blockIndex: Int) {
+    fun onVisibleBlockChanged(blockIndex: Int, charOffset: Int = 0) {
         val chapIdx = _uiState.value.chapter?.chapterIndex ?: return
         val totalChapters = _uiState.value.index?.chapters?.size ?: 1
         _uiState.update { it.copy(visibleBlockIndex = blockIndex) }
         val now = System.currentTimeMillis()
-        if (kotlin.math.abs(blockIndex - lastSavedBlock) >= 3 || now - lastSavedTimeMs >= 2000L) {
+        val chapterChanged = chapIdx != lastSavedChapter
+        val movedWithinOrAcross = kotlin.math.abs(blockIndex - lastSavedBlock) >= 3 ||
+            (blockIndex == lastSavedBlock && charOffset != lastSavedCharOffset && now - lastSavedTimeMs >= 800L)
+        if (chapterChanged || movedWithinOrAcross || now - lastSavedTimeMs >= 2000L) {
+            lastSavedChapter = chapIdx
             lastSavedBlock = blockIndex
+            lastSavedCharOffset = charOffset
             lastSavedTimeMs = now
-            container.bookLibrary.updateProgress(bookId, chapIdx, blockIndex, totalChapters)
+            container.bookLibrary.updateProgress(bookId, chapIdx, blockIndex, totalChapters, charOffset)
         }
     }
 

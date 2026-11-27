@@ -165,3 +165,30 @@
      - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 6s`），**0 编译警告**，`Detekt` 0 issues，`Lint` 0 errors，**45/45 单元测试全部通过**（`:core-model:test` `6`、`:core-engine:test` `30`、`:core-reader:test` `7`、`:app:testCloudDebugUnitTest` `2`）。
      - `cloud` R8 APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `1,926,801` 字节（SHA-256 `991DD7B382B94CAC2904BBE52FBAFCB9C163E5335D8DFFB5BF42694DA2B44569`），`apksigner` 校验通过（退出码 `0`）。
      - `full` R8 APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `25,600,883` 字节（SHA-256 `C7843A7489D48D686699453F595EB1D7E084D9824FCF15DF809E8472BEC8ED34`），`apksigner` 校验通过（退出码 `0`）。
+
+
+## 10. 2026-11-27 v2.2.0-pre.2 阅读器编码乱码根治、真分页横向翻页重构与 Google Drive 网盘接入
+
+针对 `v2.2.0-pre.1` 实测反馈（阅读器文字乱码、缺少真实横向翻页、需要连接个人 Google Drive 浏览导入电子书），按以下模块完成重构、修复与两轮 Qodo 审查闭环：
+
+1. **电子书编码乱码根治与二进制误导入拦截（`:core-reader` & `:app`）**：
+   - [CharsetDetector.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/CharsetDetector.kt)：新增显式 `isTruncatedSample` 参数，避免整章完整缓冲因“不足 64KB”被拒绝尾字节；新增 XML `<?xml encoding=...?>` 与 HTML `<meta charset=...>` 编码声明识别（`gb2312`/`gbk` 统一映射至 `GB18030`）、无 BOM UTF-16 奇偶零字节启发式探测、`looksLikeBinary` 魔数与非打印字符检测，并将 `transcodeToUtf8` 改为 `OutputStreamWriter` + `BoundedCountingOutputStream` 流式编码，杜绝跨块代理对拆碎产生替换符。
+   - [EpubBookParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubBookParser.kt)、[EpubXmlSupport.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubXmlSupport.kt)、[HtmlBookParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/HtmlBookParser.kt)、[TxtBookParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/TxtBookParser.kt)：全章文本与导航 XML/HTML 统一走完整缓冲 `detectMarkup` 判定，TXT 文件编码探测传参 `isTruncatedSample = fileLen > sample.size` 防止 UTF-8 多字节汉字在 4KB/8KB 采样截断时误降级回 `GB18030`。
+   - [BookImportManager.kt](../app/src/main/java/com/aitts/v2/reader/BookImportManager.kt)：抽离共享 `importFromStream`，在导入前探测 4KB 文件头校验 EPUB ZIP 容器或拦截 PDF/二进制误判，并用 `try/catch` 统一兜底 ContentProvider 异常以免书架导入态卡死。
+2. **像素级真分页横向翻页阅读器（`PAGED` 默认模式 + `SCROLL` 双模切换）**：
+   - [ReaderModels.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderModels.kt) & [ReaderSettings.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderSettings.kt)：新增 `ReaderReadingMode`（`PAGED` / `SCROLL`）、`volumeKeyPaging = true` 及 `ReadingProgress.charOffset: Int = 0` 页内字符偏移持久化。
+   - [ChapterPaginator.kt](../app/src/main/java/com/aitts/v2/ui/reader/ChapterPaginator.kt)：基于 Compose `TextMeasurer` 按屏幕真实像素高度切分 `PageBlockSlice`（记录精确 `startCharOffset`/`endCharOffset`，对齐插图+图注预留高度，断页保留完整字符间隔）。
+   - [PagedReaderViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/PagedReaderViewport.kt) & [ReaderBlockItemView.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderBlockItemView.kt)：以 `HorizontalPager` 实现左右滑动翻页、三区点击（左 30% 上一页 / 中间栏开关 / 右 30% 下一页）、边缘跨章（回上一章末页定位）、音量键翻页、字号/排版变更位置锚定以及听书高亮自动翻页不回退进度。
+   - [ReaderViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderViewModel.kt)、[ReaderScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderScreen.kt)、[ReaderContentViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderContentViewport.kt)、[ReaderSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSheets.kt)：完成双向位置同步、硬件音量键预览拦截及排版面板翻页模式/音量键开关。
+3. **Google Drive 网盘连接与直导电子书（`:core-engine` & `:app`）**：
+   - [GoogleDriveModels.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleDriveModels.kt) & [GoogleDriveClient.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleDriveClient.kt)：纯 JVM OkHttp 实现 OAuth 2.0 PKCE + Drive REST v3（复用 `HttpClientManager` 全局代理设置），支持 401 自动刷新 Token、目录限定搜索与受限临时下载。
+   - [SecretStore.kt](../app/src/main/java/com/aitts/v2/data/SecretStore.kt) & [proguard-rules.pro](../app/proguard-rules.pro)：新增加密凭证字符串读写方法与 `com.aitts.v2.engine.cloud.**` R8 保留规则。
+   - [GoogleDriveRepository.kt](../app/src/main/java/com/aitts/v2/reader/GoogleDriveRepository.kt)、[GoogleDriveViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/GoogleDriveViewModel.kt)、[GoogleDriveScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/GoogleDriveScreen.kt)、[GoogleDriveConnectCard.kt](../app/src/main/java/com/aitts/v2/ui/reader/GoogleDriveConnectCard.kt)：提供“OAuth 浏览器环回 PKCE 登录”与“Token 直连”双通道、多连接竞态隔离与 `/callback` 非目标本地请求过滤、面包屑导航、搜索/仅看电子书过滤及直导书架；书架页与导航接入“网盘”入口。
+4. **Qodo CLI 两轮审查与最终全量验收（已达 2 轮止损上限）**：
+   - **Qodo 第 1 轮**（`operation_id: d40c9d8f-811b-49e0-a206-2512813d44bc`）：指出 11 项引入问题（文本点击区域覆盖、字号调整位置偏移、图片高度超算、旧搜索覆盖、OAuth 取消竞态与缺少 `soTimeout`、非根目录搜索范围、凭证保存静默忽略失败、流打开异常逃逸、听书进度回退、`transcodeToUtf8` 跨块代理对替换），当轮全部修复并通过 `flash` 子代理 49/49 门禁。
+   - **Qodo 第 2 轮增量复核**（`operation_id: b378303a-82d3-4a0d-9744-2d0ffd10b18f`）：确认第 1 轮 11 项全部 `resolved`，并修复第 2 轮新增的全部 4 项发现（`ReadingProgress.charOffset` 长段落续页恢复、`placeTextSlices` 断页空白保留、`awaitLoopbackCallback` `/callback` 校验循环过滤干扰请求、`goToChapter` 回退上章末页进度保存）。
+   - **最终全量门禁与 R8 打包实测**（全部修改完成后由 `flash` 子代理执行，退出码 `0`）：
+     - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`；全仓 `src/` 含单测共 `133` 个 `.kt` 文件 / `20,188` 行：`core-model/src` 14/1,416、`core-engine/src` 42/5,587、`core-reader/src` 13/2,150、`app/src` 64/11,035）。
+     - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 49s`），**0 编译警告**，`Detekt` 0 issues，`Lint` 0 errors，**49/49 单元测试全部通过**（`:core-model:test` `6`、`:core-engine:test` `31`、`:core-reader:test` `10`、`:app:testCloudDebugUnitTest` `2`）。
+     - `cloud` R8 APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `1,992,337` 字节（SHA-256 `066F3C253D213A844F1A97D06612457F021769D45E4FFD3A86CC5B25C4B2A3F4`），`apksigner` 校验通过（退出码 `0`）。
+     - `full` R8 APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `25,666,419` 字节（SHA-256 `19990E0AEC4C09CC660FFE6A4E33953972E322908960C3061DB7D2584B9897B5`），`apksigner` 校验通过（退出码 `0`）。

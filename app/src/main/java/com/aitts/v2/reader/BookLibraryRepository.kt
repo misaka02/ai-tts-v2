@@ -62,7 +62,13 @@ class BookLibraryRepository(context: Context) {
         }
     }
 
-    fun updateProgress(bookId: String, chapterIndex: Int, blockIndex: Int, totalChapters: Int) {
+    fun updateProgress(
+        bookId: String,
+        chapterIndex: Int,
+        blockIndex: Int,
+        totalChapters: Int,
+        charOffset: Int = 0
+    ) {
         val now = System.currentTimeMillis()
         synchronized(writeLock) {
             val current = _booksFlow.value
@@ -75,6 +81,7 @@ class BookLibraryRepository(context: Context) {
                 progress = ReadingProgress(
                     chapterIndex = chapterIndex.coerceAtLeast(0),
                     blockIndex = blockIndex.coerceAtLeast(0),
+                    charOffset = charOffset.coerceAtLeast(0),
                     totalChapters = maxOf(1, totalChapters),
                     updatedAt = now
                 )

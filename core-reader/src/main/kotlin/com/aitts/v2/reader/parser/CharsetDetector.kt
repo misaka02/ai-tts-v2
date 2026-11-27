@@ -1,6 +1,7 @@
 package com.aitts.v2.reader.parser
 
 import java.io.ByteArrayInputStream
+import java.io.FilterOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -15,33 +16,65 @@ data class DetectedCharset(
 )
 
 /**
- * Lightweight deterministic charset detector for plain-text e-books (UTF-8 / UTF-16 / GB18030).
+ * Deterministic charset detector & binary guard for plain-text and XML/HTML e-books.
  */
 object CharsetDetector {
 
     private const val SAMPLE_BYTES = 64 * 1024
     private val gb18030: Charset = runCatching { Charset.forName("GB18030") }.getOrElse { Charsets.UTF_8 }
+    private val xmlEncodingRe = Regex("""<\?xml\b[^>]*\bencoding\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+    private val htmlCharsetRe = Regex("""<meta\b[^>]*\bcharset\s*=\s*["']?\s*([A-Za-z0-9._-]+)""", RegexOption.IGNORE_CASE)
 
-    fun detect(sample: ByteArray): DetectedCharset {
-        if (hasUtf8Bom(sample)) return DetectedCharset(Charsets.UTF_8, bomLength = 3)
-        if (sample.size >= 2 && sample[0] == 0xFE.toByte() && sample[1] == 0xFF.toByte()) {
-            return DetectedCharset(Charsets.UTF_16BE, bomLength = 2)
-        }
-        if (sample.size >= 2 && sample[0] == 0xFF.toByte() && sample[1] == 0xFE.toByte()) {
-            return DetectedCharset(Charsets.UTF_16LE, bomLength = 2)
-        }
-        val allowPartialTail = sample.size >= SAMPLE_BYTES
-        return if (isValidUtf8(sample, allowPartialTail)) {
+    fun detect(sample: ByteArray, isTruncatedSample: Boolean = false): DetectedCharset {
+        detectBom(sample)?.let { return it }
+        detectUtf16WithoutBom(sample)?.let { return DetectedCharset(it, bomLength = 0) }
+        val stats = analyzeUtf8(sample, allowIncompleteTail = isTruncatedSample)
+        val isUtf8 = stats.invalidCount == 0 ||
+            (stats.validMultiByteCount >= 20 && stats.validMultiByteCount >= stats.invalidCount * 50)
+        return if (isUtf8) {
             DetectedCharset(Charsets.UTF_8, bomLength = 0)
         } else {
             DetectedCharset(gb18030, bomLength = 0)
         }
     }
 
-    private fun hasUtf8Bom(sample: ByteArray): Boolean = sample.size >= 3 &&
-        sample[0] == 0xEF.toByte() &&
-        sample[1] == 0xBB.toByte() &&
-        sample[2] == 0xBF.toByte()
+    fun detectMarkup(bytes: ByteArray, isTruncatedSample: Boolean = false): DetectedCharset {
+        detectBom(bytes)?.let { return it }
+        val head = String(bytes, 0, minOf(1024, bytes.size), Charsets.ISO_8859_1)
+        val declared = xmlEncodingRe.find(head)?.groupValues?.getOrNull(1)
+            ?: htmlCharsetRe.find(head)?.groupValues?.getOrNull(1)
+        if (!declared.isNullOrBlank()) {
+            val cleanDecl = declared.trim()
+            val resolved = if (cleanDecl.equals("gb2312", true) || cleanDecl.equals("gbk", true)) {
+                gb18030
+            } else {
+                runCatching { Charset.forName(cleanDecl) }.getOrNull()
+            }
+            if (resolved != null) {
+                val stats = analyzeUtf8(bytes, allowIncompleteTail = isTruncatedSample)
+                val finalCharset = if (resolved != Charsets.UTF_8 && stats.invalidCount == 0 && stats.validMultiByteCount >= 4) {
+                    Charsets.UTF_8
+                } else {
+                    resolved
+                }
+                return DetectedCharset(finalCharset, bomLength = 0)
+            }
+        }
+        return detect(bytes, isTruncatedSample)
+    }
+
+    fun looksLikeBinary(sample: ByteArray): Boolean {
+        if (sample.isEmpty()) return false
+        if (hasBinaryMagic(sample)) return true
+        if (detectBom(sample) != null || detectUtf16WithoutBom(sample) != null) return false
+        var controlCount = 0
+        for (byteVal in sample) {
+            val b = byteVal.toInt() and 0xFF
+            val isControl = b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D && b != 0x0C
+            if (isControl) controlCount++
+        }
+        return controlCount * 50 > sample.size
+    }
 
     fun transcodeToUtf8(
         input: InputStream,
@@ -49,7 +82,7 @@ object CharsetDetector {
         maxBytes: Long = 200L * 1024 * 1024
     ): Long {
         val sample = readSample(input, SAMPLE_BYTES)
-        val detected = detect(sample)
+        val detected = detect(sample, isTruncatedSample = sample.size == SAMPLE_BYTES)
         val tailPrefix = if (detected.bomLength < sample.size) {
             ByteArrayInputStream(sample, detected.bomLength, sample.size - detected.bomLength)
         } else {
@@ -61,28 +94,101 @@ object CharsetDetector {
             return copyBounded(fullStream, output, maxBytes)
         }
 
-        var writtenBytes = 0L
+        val countingOut = BoundedCountingOutputStream(output, maxBytes)
         InputStreamReader(fullStream, detected.charset).use { reader ->
-            OutputStreamWriter(output, Charsets.UTF_8).use { writer ->
-                val charBuf = CharArray(8192)
-                while (true) {
-                    val count = reader.read(charBuf)
-                    if (count <= 0) break
-                    val encoded = String(charBuf, 0, count).toByteArray(Charsets.UTF_8)
-                    writtenBytes += encoded.size
-                    if (writtenBytes > maxBytes) {
-                        throw IOException("文本超出最大限制 (${maxBytes / (1024 * 1024)} MB)")
-                    }
-                    output.write(encoded)
-                }
-                writer.flush()
+            val writer = OutputStreamWriter(countingOut, Charsets.UTF_8)
+            val charBuf = CharArray(8192)
+            while (true) {
+                val count = reader.read(charBuf)
+                if (count <= 0) break
+                writer.write(charBuf, 0, count)
             }
+            writer.flush()
         }
-        return writtenBytes
+        return countingOut.bytesWritten
     }
 
-    internal fun isValidUtf8(bytes: ByteArray, allowIncompleteTail: Boolean = false): Boolean {
+    private class BoundedCountingOutputStream(
+        delegate: OutputStream,
+        private val maxBytes: Long
+    ) : FilterOutputStream(delegate) {
+        var bytesWritten: Long = 0L
+            private set
+
+        override fun write(b: Int) {
+            if (++bytesWritten > maxBytes) {
+                throw IOException("文本超出最大限制 (${maxBytes / (1024 * 1024)} MB)")
+            }
+            out.write(b)
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            bytesWritten += len
+            if (bytesWritten > maxBytes) {
+                throw IOException("文本超出最大限制 (${maxBytes / (1024 * 1024)} MB)")
+            }
+            out.write(b, off, len)
+        }
+    }
+
+    internal fun isValidUtf8(bytes: ByteArray, allowIncompleteTail: Boolean = false): Boolean =
+        analyzeUtf8(bytes, allowIncompleteTail).invalidCount == 0
+
+    private fun detectBom(sample: ByteArray): DetectedCharset? = when {
+        hasUtf8Bom(sample) -> DetectedCharset(Charsets.UTF_8, bomLength = 3)
+        sample.size >= 2 && sample[0] == 0xFE.toByte() && sample[1] == 0xFF.toByte() ->
+            DetectedCharset(Charsets.UTF_16BE, bomLength = 2)
+        sample.size >= 2 && sample[0] == 0xFF.toByte() && sample[1] == 0xFE.toByte() ->
+            DetectedCharset(Charsets.UTF_16LE, bomLength = 2)
+        else -> null
+    }
+
+    private fun hasUtf8Bom(sample: ByteArray): Boolean = sample.size >= 3 &&
+        sample[0] == 0xEF.toByte() &&
+        sample[1] == 0xBB.toByte() &&
+        sample[2] == 0xBF.toByte()
+
+    private fun detectUtf16WithoutBom(sample: ByteArray): Charset? {
+        if (sample.size < 16) return null
+        var evenNulls = 0
+        var oddNulls = 0
+        val pairs = minOf(sample.size / 2, 1024)
+        for (p in 0 until pairs) {
+            if (sample[p * 2] == 0.toByte()) evenNulls++
+            if (sample[p * 2 + 1] == 0.toByte()) oddNulls++
+        }
+        return when {
+            oddNulls * 4 >= pairs && evenNulls * 20 < pairs -> Charsets.UTF_16LE
+            evenNulls * 4 >= pairs && oddNulls * 20 < pairs -> Charsets.UTF_16BE
+            else -> null
+        }
+    }
+
+    private fun hasBinaryMagic(sample: ByteArray): Boolean {
+        if (matchesBytes(sample, '%'.code, 'P'.code, 'D'.code, 'F'.code)) return true
+        if (matchesBytes(sample, 0x50, 0x4B, 0x03, 0x04)) return true
+        if (matchesBytes(sample, 'R'.code, 'a'.code, 'r'.code, '!'.code)) return true
+        if (sample.size >= 68) {
+            val mobiMagic = String(sample, 60, 8, Charsets.ISO_8859_1)
+            if (mobiMagic == "BOOKMOBI" || mobiMagic == "TEXtREAd") return true
+        }
+        return false
+    }
+
+    private fun matchesBytes(sample: ByteArray, vararg expected: Int): Boolean {
+        if (sample.size < expected.size) return false
+        for (i in expected.indices) {
+            if ((sample[i].toInt() and 0xFF) != expected[i]) return false
+        }
+        return true
+    }
+
+    private data class Utf8Stats(val validMultiByteCount: Int, val invalidCount: Int)
+
+    private fun analyzeUtf8(bytes: ByteArray, allowIncompleteTail: Boolean): Utf8Stats {
         var i = 0
+        var multiByte = 0
+        var invalid = 0
         while (i < bytes.size) {
             val b0 = bytes[i].toInt() and 0xFF
             if (b0 < 0x80) {
@@ -90,14 +196,25 @@ object CharsetDetector {
                 continue
             }
             val expectedLen = utf8SequenceLength(b0)
-            if (expectedLen == 0) return false
-            if (i + expectedLen > bytes.size) {
-                return allowIncompleteTail && validContinuationRange(bytes, i + 1, bytes.size)
+            if (expectedLen == 0) {
+                invalid++
+                i++
+                continue
             }
-            if (!validContinuationRange(bytes, i + 1, i + expectedLen)) return false
-            i += expectedLen
+            if (i + expectedLen > bytes.size) {
+                val tailValid = allowIncompleteTail && validContinuationRange(bytes, i + 1, bytes.size)
+                if (!tailValid) invalid++
+                break
+            }
+            if (validContinuationRange(bytes, i + 1, i + expectedLen)) {
+                multiByte++
+                i += expectedLen
+            } else {
+                invalid++
+                i++
+            }
         }
-        return true
+        return Utf8Stats(multiByte, invalid)
     }
 
     private fun utf8SequenceLength(lead: Int): Int = when {

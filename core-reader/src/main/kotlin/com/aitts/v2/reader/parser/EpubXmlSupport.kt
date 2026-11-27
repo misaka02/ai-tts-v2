@@ -97,7 +97,9 @@ internal object EpubXmlSupport {
     fun parseXmlDocument(bytes: ByteArray): Document? {
         val firstAttempt = parseXmlInternal(bytes)
         if (firstAttempt != null) return firstAttempt
-        val raw = bytes.toString(Charsets.UTF_8).replace(BARE_AMP_RE, "&amp;")
+        val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
+        val decoded = String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
+        val raw = decoded.replace(BARE_AMP_RE, "&amp;")
         return parseXmlInternal(raw.toByteArray(Charsets.UTF_8))
     }
 
@@ -229,7 +231,9 @@ internal object EpubXmlSupport {
             options = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
         )
         val tagStripRe = Regex("<[^>]+>")
-        for (match in linkRe.findAll(bytes.toString(Charsets.UTF_8))) {
+        val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
+        val navHtml = String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
+        for (match in linkRe.findAll(navHtml)) {
             val path = normalizeZipPath(navDir, match.groupValues[1]) ?: continue
             val rawLabel = match.groupValues[2].replace(tagStripRe, " ")
             val label = EpubHtmlParser.decodeEntities(rawLabel).replace(Regex("\\s+"), " ").trim()

@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,14 +33,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.reader.model.ReaderPaperTheme
+import com.aitts.v2.reader.model.ReaderReadingMode
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 @Composable
@@ -60,8 +71,15 @@ fun ReaderScreen(
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
+    val pageTurnChannel = remember { Channel<Int>(capacity = 4) }
+    val pageTurnEvents = remember(pageTurnChannel) { pageTurnChannel.receiveAsFlow() }
     val colors = rememberReaderColors(readerSettings.paperTheme)
     val appDefaultIsDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    LaunchedEffect(Unit) {
+        runCatching { focusRequester.requestFocus() }
+    }
 
     if (!view.isInEditMode) {
         SideEffect {
@@ -114,7 +132,32 @@ fun ReaderScreen(
         Color(readerSettings.paperTheme.bgHex).copy(alpha = 0.97f)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { ev ->
+                if (readerSettings.readingMode != ReaderReadingMode.PAGED || !readerSettings.volumeKeyPaging) {
+                    return@onPreviewKeyEvent false
+                }
+                if (state.activeSheet != null || ev.type != KeyEventType.KeyDown) {
+                    return@onPreviewKeyEvent false
+                }
+                when (ev.key) {
+                    Key.VolumeUp -> {
+                        pageTurnChannel.trySend(-1)
+                        true
+                    }
+                    Key.VolumeDown -> {
+                        pageTurnChannel.trySend(1)
+                        true
+                    }
+                    else -> false
+                }
+            }
+    ) {
         when {
             state.isLoading && chapter == null -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -130,24 +173,46 @@ fun ReaderScreen(
                 }
             }
             chapter != null && index != null && book != null -> {
-                ReaderContentViewport(
-                    chapter = chapter,
-                    totalChapters = index.chapters.size,
-                    readerSettings = readerSettings,
-                    colors = colors,
-                    listState = listState,
-                    activeTtsBlockIndex = activeTtsBlock,
-                    pendingScrollBlockIndex = state.pendingScrollBlockIndex,
-                    onConsumedPendingScroll = viewModel::consumePendingScroll,
-                    onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
-                    onTapBody = viewModel::toggleChrome,
-                    onLongPressSpeak = viewModel::startTtsFromBlock,
-                    onPrevChapter = { viewModel.stepChapter(-1) },
-                    onNextChapter = { viewModel.stepChapter(1) },
-                    loadImage = viewModel::loadBookImage
-                )
+                if (readerSettings.readingMode == ReaderReadingMode.PAGED) {
+                    PagedReaderViewport(
+                        chapter = chapter,
+                        totalChapters = index.chapters.size,
+                        bookProgressPercent = book.progress.progressPercent,
+                        readerSettings = readerSettings,
+                        colors = colors,
+                        activeTtsBlockIndex = activeTtsBlock,
+                        pendingScrollBlockIndex = state.pendingScrollBlockIndex,
+                        pendingScrollCharOffset = state.pendingScrollCharOffset,
+                        pendingLandOnLastPage = state.pendingLandOnLastPage,
+                        pageTurnEvents = pageTurnEvents,
+                        onConsumedPendingScroll = viewModel::consumePendingScroll,
+                        onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
+                        onTapCenter = viewModel::toggleChrome,
+                        onLongPressSpeak = viewModel::startTtsFromBlock,
+                        onPrevChapter = { landLast -> viewModel.stepChapter(-1, landLast) },
+                        onNextChapter = { viewModel.stepChapter(1, false) },
+                        loadImage = viewModel::loadBookImage
+                    )
+                } else {
+                    ReaderContentViewport(
+                        chapter = chapter,
+                        totalChapters = index.chapters.size,
+                        readerSettings = readerSettings,
+                        colors = colors,
+                        listState = listState,
+                        activeTtsBlockIndex = activeTtsBlock,
+                        pendingScrollBlockIndex = state.pendingScrollBlockIndex,
+                        onConsumedPendingScroll = viewModel::consumePendingScroll,
+                        onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
+                        onTapBody = viewModel::toggleChrome,
+                        onLongPressSpeak = viewModel::startTtsFromBlock,
+                        onPrevChapter = { viewModel.stepChapter(-1) },
+                        onNextChapter = { viewModel.stepChapter(1) },
+                        loadImage = viewModel::loadBookImage
+                    )
+                }
 
-                if (showJumpBackChip) {
+                if (readerSettings.readingMode == ReaderReadingMode.SCROLL && showJumpBackChip) {
                     Surface(
                         onClick = {
                             coroutineScope.launch {

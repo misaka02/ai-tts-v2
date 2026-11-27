@@ -55,7 +55,8 @@ class TxtBookParser : BookFormatParser {
     }
 
     private fun detectFileCharset(file: File): DetectedCharset {
-        val sample = ByteArray(minOf(64 * 1024L, file.length()).toInt())
+        val fileLen = file.length()
+        val sample = ByteArray(minOf(64 * 1024L, fileLen).toInt())
         if (sample.isEmpty()) return DetectedCharset(Charsets.UTF_8, 0)
         file.inputStream().use { input ->
             var offset = 0
@@ -65,7 +66,7 @@ class TxtBookParser : BookFormatParser {
                 offset += read
             }
         }
-        return CharsetDetector.detect(sample)
+        return CharsetDetector.detect(sample, isTruncatedSample = fileLen > sample.size)
     }
 
     private fun scanChapterMarkers(file: File, detected: DetectedCharset): List<ChapterMarker> {

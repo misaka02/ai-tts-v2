@@ -6,19 +6,22 @@ import android.provider.OpenableColumns
 import com.aitts.v2.reader.model.BookFormat
 import com.aitts.v2.reader.model.BookRecord
 import com.aitts.v2.reader.model.ReadingProgress
+import com.aitts.v2.reader.parser.BookFormatParser
 import com.aitts.v2.reader.parser.BookFormatRegistry
 import com.aitts.v2.reader.parser.CharsetDetector
+import com.aitts.v2.reader.parser.EpubBookParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.io.PushbackInputStream
 import java.util.UUID
 
 /**
- * Imports EPUB / TXT / Markdown / HTML e-books safely from SAF or external ACTION_VIEW URIs
- * into app-private storage, performing UTF-8 normalization, chapter indexing, and cover extraction.
+ * Imports EPUB / TXT / Markdown / HTML e-books safely from SAF, ACTION_VIEW, or cloud streams
+ * into app-private storage, validating binary headers and normalizing text encoding to UTF-8.
  */
 class BookImportManager(
     context: Context,
@@ -27,18 +30,26 @@ class BookImportManager(
     private val appContext = context.applicationContext
 
     suspend fun importFromUri(uri: Uri): Result<BookRecord> = withContext(Dispatchers.IO) {
+        try {
+            val displayName = resolveDisplayName(uri)
+            val rawStream = appContext.contentResolver.openInputStream(uri)
+                ?: throw IOException("无法读取所选文件，请确认文件权限有效")
+            importFromStream(displayName, rawStream)
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    suspend fun importFromStream(displayName: String, rawStream: InputStream): Result<BookRecord> = withContext(Dispatchers.IO) {
         val bookId = "book_${UUID.randomUUID().toString().take(8)}"
         val bookDir = library.bookDir(bookId).apply { mkdirs() }
         try {
-            val displayName = resolveDisplayName(uri)
-            val ext = displayName.substringAfterLast('.', "").lowercase()
-            val fallbackTitle = displayName.substringBeforeLast('.').ifBlank { displayName }.ifBlank { "未命名书籍" }
+            val cleanName = displayName.trim().ifBlank { "imported_book.txt" }
+            val ext = cleanName.substringAfterLast('.', "").lowercase()
+            val fallbackTitle = cleanName.substringBeforeLast('.').ifBlank { cleanName }.ifBlank { "未命名书籍" }
 
-            val rawStream = appContext.contentResolver.openInputStream(uri)
-                ?: throw IOException("无法读取所选文件，请确认文件权限有效")
-
-            val sourceFile = writeNormalizedSource(rawStream, bookDir, ext, displayName)
-            val parser = BookFormatRegistry.resolve(sourceFile, displayName)
+            val sourceFile = writeNormalizedSource(rawStream, bookDir, ext, cleanName)
+            val parser = BookFormatRegistry.resolve(sourceFile, cleanName)
             val index = parser.indexBook(sourceFile, fallbackTitle)
             library.saveBookIndex(bookId, index)
 
@@ -74,20 +85,21 @@ class BookImportManager(
     }
 
     private fun writeNormalizedSource(
-        rawStream: java.io.InputStream,
+        rawStream: InputStream,
         bookDir: File,
         ext: String,
         displayName: String
     ): File {
-        PushbackInputStream(BufferedInputStream(rawStream, 16 * 1024), 4).use { pb ->
-            val header = ByteArray(4)
-            val read = pb.read(header)
+        PushbackInputStream(BufferedInputStream(rawStream, 16 * 1024), PEEK_BYTES).use { pb ->
+            val header = ByteArray(PEEK_BYTES)
+            val read = readUpTo(pb, header)
             if (read > 0) pb.unread(header, 0, read)
-            val isZipMagic = read == 4 &&
-                header[0] == 0x50.toByte() &&
-                header[1] == 0x4B.toByte() &&
-                header[2] == 0x03.toByte() &&
-                header[3] == 0x04.toByte()
+            val peekSlice = if (read == header.size) header else header.copyOf(read.coerceAtLeast(0))
+            val isZipMagic = peekSlice.size >= 4 &&
+                peekSlice[0] == 0x50.toByte() &&
+                peekSlice[1] == 0x4B.toByte() &&
+                peekSlice[2] == 0x03.toByte() &&
+                peekSlice[3] == 0x04.toByte()
 
             val targetExt = when {
                 isZipMagic || ext == "epub" -> "epub"
@@ -95,6 +107,11 @@ class BookImportManager(
                 ext in BookFormat.HTML.extensions -> "html"
                 else -> "txt"
             }
+
+            if (targetExt != "epub" && CharsetDetector.looksLikeBinary(peekSlice)) {
+                throw IOException("暂不支持此二进制文件格式（当前仅支持 EPUB / TXT / Markdown / HTML）")
+            }
+
             val destFile = File(bookDir, "source.$targetExt")
             destFile.outputStream().use { out ->
                 if (targetExt == "epub") {
@@ -103,12 +120,25 @@ class BookImportManager(
                     CharsetDetector.transcodeToUtf8(pb, out, MAX_BOOK_BYTES)
                 }
             }
+            if (targetExt == "epub" && !EpubBookParser().canParse(destFile, displayName)) {
+                throw IOException("文件不是有效的 EPUB 电子书（缺少 META-INF/container.xml）")
+            }
             return destFile
         }
     }
 
+    private fun readUpTo(stream: InputStream, buffer: ByteArray): Int {
+        var total = 0
+        while (total < buffer.size) {
+            val count = stream.read(buffer, total, buffer.size - total)
+            if (count <= 0) break
+            total += count
+        }
+        return total
+    }
+
     private fun copyBounded(
-        input: java.io.InputStream,
+        input: InputStream,
         output: java.io.OutputStream,
         maxBytes: Long,
         displayName: String
@@ -128,7 +158,7 @@ class BookImportManager(
     }
 
     private fun saveCoverIfPresent(
-        parser: com.aitts.v2.reader.parser.BookFormatParser,
+        parser: BookFormatParser,
         sourceFile: File,
         coverPath: String,
         bookDir: File
@@ -165,6 +195,7 @@ class BookImportManager(
     }
 
     companion object {
+        private const val PEEK_BYTES = 4096
         private const val MAX_BOOK_BYTES = 200L * 1024L * 1024L
         private const val MAX_COVER_BYTES = 6 * 1024 * 1024
     }

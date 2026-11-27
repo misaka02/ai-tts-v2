@@ -26,6 +26,12 @@ enum class ReaderFontFamily(val displayName: String) {
 }
 
 @Serializable
+enum class ReaderReadingMode(val displayName: String) {
+    PAGED("左右翻页"),
+    SCROLL("上下滚动")
+}
+
+@Serializable
 data class ReaderSettings(
     val paperTheme: ReaderPaperTheme = ReaderPaperTheme.CREAM,
     val fontSizeSp: Float = 18f,
@@ -33,6 +39,8 @@ data class ReaderSettings(
     val paragraphSpacingDp: Float = 12f,
     val horizontalPaddingDp: Float = 20f,
     val fontFamily: ReaderFontFamily = ReaderFontFamily.SERIF,
+    val readingMode: ReaderReadingMode = ReaderReadingMode.PAGED,
+    val volumeKeyPaging: Boolean = true,
     val firstLineIndent: Boolean = true,
     val autoScrollOnTts: Boolean = true,
     val autoNextChapterOnTts: Boolean = true

@@ -8,6 +8,7 @@ import com.aitts.v2.reader.parser.HtmlBookParser
 import com.aitts.v2.reader.parser.MarkdownBookParser
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -107,6 +108,58 @@ class EpubAndMarkupParserTest {
         assertArrayEquals(fakeCover, parser.readResource(epubFile, index.coverResourcePath!!))
         assertArrayEquals(fakeInlineImg, parser.readResource(epubFile, img.resourcePath))
         assertNull(parser.readResource(epubFile, "../../etc/passwd"))
+    }
+
+    @Test
+    fun `parses large multi-12KB Chinese UTF-8 EPUB chapter and GBK XHTML without mojibake`() {
+        val dir = testDir("epub_long_cjk")
+        val epubFile = File(dir, "long_cjk.epub")
+        val repeatedParagraph = "江南可采莲，莲叶何田田。鱼戏莲叶间，鱼戏莲叶东，鱼戏莲叶西，鱼戏莲叶南，鱼戏莲叶北。"
+        val chapterHtml = buildString {
+            append("<?xml version=\"1.0\" encoding=\"UTF-8\"?><html><body><h1>长卷正文</h1>")
+            repeat(80) { idx -> append("<p>${idx + 1}. $repeatedParagraph</p>") }
+            append("</body></html>")
+        }
+        val gbkChapterBytes = "<html><head><meta charset=\"gb2312\"/></head><body><p>镕基旧事：大漠孤烟直，长河落日圆。</p></body></html>"
+            .toByteArray(java.nio.charset.Charset.forName("GB18030"))
+
+        writeZip(
+            epubFile,
+            mapOf(
+                "META-INF/container.xml" to """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                      <rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+                    </container>
+                """.trimIndent().toByteArray(),
+                "content.opf" to """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+                      <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>长卷集</dc:title></metadata>
+                      <manifest>
+                        <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                        <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+                      </manifest>
+                      <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine>
+                    </package>
+                """.trimIndent().toByteArray(),
+                "ch1.xhtml" to chapterHtml.toByteArray(Charsets.UTF_8),
+                "ch2.xhtml" to gbkChapterBytes
+            )
+        )
+
+        val parser = EpubBookParser()
+        val index = parser.indexBook(epubFile, "长卷集")
+        assertEquals(2, index.chapters.size)
+
+        val c1 = parser.loadChapter(epubFile, index.chapters[0])
+        assertTrue(c1.blocks.size == 81)
+        assertEquals("长卷正文", c1.blocks[0].speakableText)
+        assertTrue(c1.blocks[1].speakableText?.contains("江南可采莲") == true)
+        assertFalse(c1.blocks.any { it.speakableText?.contains('\uFFFD') == true })
+
+        val c2 = parser.loadChapter(epubFile, index.chapters[1])
+        assertEquals("镕基旧事：大漠孤烟直，长河落日圆。", c2.blocks[0].speakableText)
     }
 
     @Test

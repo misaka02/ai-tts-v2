@@ -30,6 +30,9 @@ class BookshelfViewModel(private val container: AppContainer) : ViewModel() {
     private val statusMessageFlow = MutableStateFlow<String?>(null)
 
     val ttsStateFlow: StateFlow<ReaderTtsState> = container.readerTts.stateFlow
+    val isDriveConnectedFlow: StateFlow<Boolean> = container.googleDrive.authFlow
+        .combine(searchQueryFlow) { auth, _ -> auth.isConnected }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), container.googleDrive.authFlow.value.isConnected)
 
     val uiState: StateFlow<BookshelfUiState> = combine(
         container.bookLibrary.booksFlow,

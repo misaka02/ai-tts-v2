@@ -84,7 +84,7 @@ class HtmlBookParser : BookFormatParser {
             throw IOException("HTML 文件超出 ${MAX_HTML_BYTES / (1024 * 1024)} MB 上限")
         }
         val bytes = file.readBytes()
-        val detected = CharsetDetector.detect(bytes.copyOf(minOf(8192, bytes.size)))
+        val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
         return String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
     }
 

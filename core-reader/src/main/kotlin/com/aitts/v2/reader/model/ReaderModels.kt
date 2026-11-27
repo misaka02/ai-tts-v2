@@ -14,6 +14,7 @@ enum class BookFormat(val label: String, val extensions: List<String>) {
 data class ReadingProgress(
     val chapterIndex: Int = 0,
     val blockIndex: Int = 0,
+    val charOffset: Int = 0,
     val totalChapters: Int = 1,
     val updatedAt: Long = 0L
 ) {

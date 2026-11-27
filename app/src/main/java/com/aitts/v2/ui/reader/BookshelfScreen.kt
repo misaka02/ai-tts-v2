@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CloudQueue
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Search
@@ -36,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,11 +66,13 @@ import com.aitts.v2.ui.theme.PillTone
 @Composable
 fun BookshelfScreen(
     viewModel: BookshelfViewModel,
-    onOpenBook: (String) -> Unit
+    onOpenBook: (String) -> Unit,
+    onOpenGoogleDrive: () -> Unit
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val ttsState by viewModel.ttsStateFlow.collectAsStateWithLifecycle()
+    val isDriveConnected by viewModel.isDriveConnectedFlow.collectAsStateWithLifecycle()
     var pendingDeleteBook by remember { mutableStateOf<BookRecord?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -91,6 +95,8 @@ fun BookshelfScreen(
             BookshelfHeader(
                 bookCount = state.books.size,
                 isImporting = state.isImporting,
+                isDriveConnected = isDriveConnected,
+                onOpenGoogleDrive = onOpenGoogleDrive,
                 onImportClick = {
                     picker.launch(
                         arrayOf("application/epub+zip", "text/plain", "text/markdown", "text/html", "*/*")
@@ -204,6 +210,8 @@ fun BookshelfScreen(
 private fun BookshelfHeader(
     bookCount: Int,
     isImporting: Boolean,
+    isDriveConnected: Boolean,
+    onOpenGoogleDrive: () -> Unit,
     onImportClick: () -> Unit
 ) {
     Row(
@@ -215,15 +223,22 @@ private fun BookshelfHeader(
             Text("书架", style = MaterialTheme.typography.headlineMedium)
             InkStatusPill(label = "$bookCount 本馆藏", tone = PillTone.NEUTRAL)
         }
-        Button(onClick = onImportClick, enabled = !isImporting) {
-            if (isImporting) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text("解析中...")
-            } else {
-                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("导入书籍")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = onOpenGoogleDrive) {
+                Icon(Icons.Outlined.CloudQueue, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (isDriveConnected) "网盘✓" else "网盘")
+            }
+            Button(onClick = onImportClick, enabled = !isImporting) {
+                if (isImporting) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("解析中...")
+                } else {
+                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("导入")
+                }
             }
         }
     }

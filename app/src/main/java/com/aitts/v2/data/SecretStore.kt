@@ -46,6 +46,22 @@ class SecretStore(context: Context) {
         prefs.edit().remove(providerId).apply()
     }
 
+    fun getSecretString(key: String): String? {
+        val raw = prefs.getString(key, null) ?: return null
+        return runCatching { decrypt(raw) }.getOrNull()
+    }
+
+    fun saveSecretString(key: String, value: String): Boolean {
+        if (value.isBlank()) {
+            prefs.edit().remove(key).apply()
+            return true
+        }
+        return runCatching {
+            val encrypted = encrypt(value)
+            prefs.edit().putString(key, encrypted).apply()
+        }.isSuccess
+    }
+
     fun exportAllCredentials(providerIds: Iterable<String>): Map<String, ProviderCredentials> {
         return providerIds.mapNotNull { id ->
             val creds = getCredentials(id)

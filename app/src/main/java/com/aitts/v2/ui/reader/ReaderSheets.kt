@@ -29,6 +29,7 @@ import com.aitts.v2.model.ProviderDescriptorRegistry
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.reader.model.ReaderFontFamily
 import com.aitts.v2.reader.model.ReaderPaperTheme
+import com.aitts.v2.reader.model.ReaderReadingMode
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.ui.theme.InkPaperCard
 
@@ -51,6 +52,21 @@ fun ReaderAppearanceSheet(
             Text("排版与纸张主题", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
             InkPaperCard(padding = 14.dp) {
+                Text("阅读翻页模式", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReaderReadingMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = settings.readingMode == mode,
+                            onClick = { onUpdate { it.copy(readingMode = mode) } },
+                            label = { Text(mode.displayName) }
+                        )
+                    }
+                }
+                if (settings.readingMode == ReaderReadingMode.PAGED) {
+                    ToggleRow("音量键翻页", settings.volumeKeyPaging) { checked ->
+                        onUpdate { it.copy(volumeKeyPaging = checked) }
+                    }
+                }
                 Text("纸张与夜读模式", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     ReaderPaperTheme.entries.forEach { theme ->

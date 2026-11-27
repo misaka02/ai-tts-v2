@@ -59,7 +59,7 @@ class EpubBookParser : BookFormatParser {
                 ?: throw IOException("非法章节路径: ${chapter.locator}")
             val bytes = EpubXmlSupport.readZipEntryBytes(zip, path, MAX_CHAPTER_BYTES)
                 ?: throw IOException("章节不存在或超出大小限制: $path")
-            val detected = CharsetDetector.detect(bytes.copyOf(minOf(4096, bytes.size)))
+            val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
             val html = String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
             val blocks = EpubHtmlParser.parse(html, EpubXmlSupport.parentDir(path))
             return ChapterContent(chapter.index, chapter.title, blocks)
@@ -123,7 +123,8 @@ class EpubBookParser : BookFormatParser {
     ): String? {
         val actualPath = if (zip.getEntry(path) != null) path else lowerCaseEntries[path.lowercase()] ?: return null
         val headBytes = EpubXmlSupport.readZipEntryBytes(zip, actualPath, 16 * 1024) ?: return null
-        val html = headBytes.toString(Charsets.UTF_8)
+        val detected = CharsetDetector.detectMarkup(headBytes, isTruncatedSample = headBytes.size >= 16 * 1024)
+        val html = String(headBytes, detected.bomLength, headBytes.size - detected.bomLength, detected.charset)
         return EpubHtmlParser.extractTitle(html).takeIf { it.isNotBlank() }
     }
 

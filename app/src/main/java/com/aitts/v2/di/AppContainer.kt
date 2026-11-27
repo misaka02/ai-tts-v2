@@ -11,6 +11,7 @@ import com.aitts.v2.data.QuoteRepository
 import com.aitts.v2.data.SecretStore
 import com.aitts.v2.engine.audio.AudioPipeline
 import com.aitts.v2.engine.cache.AudioDiskCache
+import com.aitts.v2.engine.cloud.GoogleDriveClient
 import com.aitts.v2.engine.logging.EngineLogger
 import com.aitts.v2.engine.manifest.RemoteManifestRepository
 import com.aitts.v2.engine.network.HttpClientManager
@@ -22,6 +23,7 @@ import com.aitts.v2.offline.PlatformOfflineBackend
 import com.aitts.v2.reader.BookImportManager
 import com.aitts.v2.reader.BookLibraryRepository
 import com.aitts.v2.reader.EpubImageLoader
+import com.aitts.v2.reader.GoogleDriveRepository
 import com.aitts.v2.reader.ReaderTtsController
 import com.aitts.v2.service.FloatingSubtitleOverlay
 import com.aitts.v2.service.SleepTimerController
@@ -110,6 +112,8 @@ class AppContainer(context: Context) {
 
     val bookLibrary = BookLibraryRepository(appContext)
     val bookImportManager = BookImportManager(appContext, bookLibrary)
+    val googleDriveClient = GoogleDriveClient(httpManager)
+    val googleDrive = GoogleDriveRepository(appContext, secretStore, googleDriveClient, bookImportManager)
     val epubImageLoader = EpubImageLoader(bookLibrary)
     val readerTts = ReaderTtsController(
         context = appContext,
