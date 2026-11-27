@@ -2,7 +2,9 @@
 
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
-- **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，初始代码提交 `650ded0`）
+- **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
+- **GitHub Release**：`https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0`（含 `ai-tts-v2-cloud-v2.0.0.apk` 与 `ai-tts-v2-full-arm64-v2.0.0.apk`）
+- **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包”规则。
 - **代码体量总计**（不含 `build/`）：**87 个 `.kt` 文件，共 9,889 行**
   - `:core-model`：11 个文件，1,027 行
   - `:core-engine`：37 个文件，4,017 行（另含 `Sonic.java`）

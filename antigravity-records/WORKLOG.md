@@ -66,3 +66,10 @@
      - `app/build/outputs/mapping/cloudRelease/mapping.txt`：`32,688,192` 字节
      - `app/build/outputs/mapping/fullRelease/mapping.txt`：`33,148,328` 字节
    - **`apksigner.bat verify --print-certs`（build-tools `36.0.0`）**：双包均验证通过（退出码 `0`，APK Signature Scheme v2，Signer: `CN=Android Debug, O=Android, C=US`）。
+
+## 5. 全局规则持久化与 GitHub 上线发布（2026-11-27）
+1. **全局 R8 规则持久化**：已将「Android 编译默认交付 R8 压缩签名包」硬性规范写入 `C:\Users\s1356\.gemini\GEMINI.md`（第 4 条）、`C:\Users\s1356\.gemini\config\rules\AGENTS.md`（第 6 条）及 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md`（第 6 条）。
+2. **GitHub Actions CI 更新**：更新 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，将默认构建任务升级为 `./gradlew assembleR8Release --no-daemon` 并上传 R8 Release 工件。
+3. **GitHub 仓库创建与 v2.0.0 发布**：
+   - 新建公开仓库 `https://github.com/misaka02/ai-tts-v2` 并推送 `main` 分支。
+   - 推送标签 `v2.0.0` 并发布 GitHub Release：`https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0`，已上传附件 `ai-tts-v2-cloud-v2.0.0.apk`（`1,778,797` 字节）与 `ai-tts-v2-full-arm64-v2.0.0.apk`（`25,469,263` 字节）。
