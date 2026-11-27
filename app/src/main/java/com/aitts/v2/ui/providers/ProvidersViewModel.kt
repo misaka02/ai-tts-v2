@@ -247,8 +247,9 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         config: TtsProviderConfig,
         caps: ProviderCapabilities
     ): ByteArray {
-        val scaled = if (config.requiresClientSpeedScaling(isStreaming = false, capabilities = caps)) {
-            val scaler = SonicSpeedScaler(24000, 1, config.speed)
+        val speedPlan = config.resolveSpeed(isStreaming = false, capabilities = caps)
+        val scaled = if (speedPlan.needsClientSonic) {
+            val scaler = SonicSpeedScaler(24000, 1, speedPlan.clientSonicFactor, speedPlan.clientSonicPitch)
             scaler.processChunk(rawPcm) + scaler.flush()
         } else {
             rawPcm

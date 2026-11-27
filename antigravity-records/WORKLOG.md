@@ -121,3 +121,25 @@
      - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 1m 56s`），**34/34 单元测试全部通过**（`:core-model:test` 5、`:core-engine:test` 27、`:app:testCloudDebugUnitTest` 2），`Detekt` 0 issues，`Lint` 0 errors。
      - `cloud` R8 Release APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `1,828,249` 字节（约 `1.74 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。
      - `full` R8 Release APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `25,502,331` 字节（约 `24.32 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。
+
+## 8. 全部 10 引擎声学规范统一与 Sonic 音调/残差补速对齐 (`v2.1.0-pre.3`, 2026-11-27)
+1. **建立单一声学事实来源 ([EngineAcousticSpec.kt](../core-model/src/main/kotlin/com/aitts/v2/model/EngineAcousticSpec.kt))**：
+   - 将所有 10 个引擎的原生语速区间、原生音调区间与单位语义集中建模于 `ProviderDescriptor.acousticSpec`，并由 `AcousticMapper` 统一映射到各家上游协议边界：
+     - **Edge TTS**：语速 `0.5..2.0` (`-50%..+100%`)，音调改为规范的 `-50Hz..+50Hz`（对称映射到 `0.5..1.5`）。
+     - **Azure Speech**：语速支持完整 `0.5..3.0` (`-50%..+200%`)，音调 `0.5..1.5` 钳位至 `-50%..+50%`。
+     - **MiniMax Speech-02**：语速钳位 `0.5..2.0`；音调 `0.5..1.5` 对称映射为官方整数半音 `-12..+12`（修复此前低音仅到 `-6` 的不对称问题）。
+     - **豆包 / 火山引擎**：`speed_ratio` 钳位 `0.5..2.0`；对 `*_bigtts` 大模型音色自动省略 `pitch_ratio`，标准音色钳位 `0.5..1.5`。
+     - **OpenAI 兼容**：`speed` 钳位 `0.25..4.0`；对 `tts-1` / `tts-1-hd` 自动省略 `instructions`。
+     - **Fish Audio / Sherpa-ONNX**：分别通过 `fishSpeed(0.5..2.0)` 与 `sherpaSpeed(0.5..2.5)` 精确钳位。
+     - **Gemini / 小米 MiMo**：统一移除硬编码语速/音调英文/中文提示词注入及 MiMo 批处理冲突的 `audio.speed` 字段，仅保留用户 `promptInstruction`，精确语速与音调统一走客户端 Sonic。
+2. **Sonic 残差倍速与客户端音调接管**：
+   - 在 `SonicSpeedScaler.kt` 中启用 `Sonic.setPitch`，配合 `AcousticMapper.resolveSpeed` 将目标语速/音调拆分为「上游合法参数 + 本地 Sonic 残差补足」（如 MiniMax/Fish 请求 `2.5x` 时上游发 `2.0x`、Sonic 补 `1.25x`；Gemini/MiMo/豆包 `bigtts` 在系统朗读传入 `pitch` 时自动由 Sonic 无感接管），同步接入 [AudioPipeline.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/audio/AudioPipeline.kt)、[SynthesisOrchestrator.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/synthesis/SynthesisOrchestrator.kt) 与 [ProvidersViewModel.kt](../app/src/main/java/com/aitts/v2/ui/providers/ProvidersViewModel.kt)。
+3. **调音 UI 严格遵循引擎能力**：
+   - [VoiceTunerSheet.kt](../app/src/main/java/com/aitts/v2/ui/hub/VoiceTunerSheet.kt) 与 [ProviderEditScreen.kt](../app/src/main/java/com/aitts/v2/ui/providers/ProviderEditScreen.kt) 全面读取 `descriptor.acousticSpec` 与 `AcousticMapper.supportsNativePitch(type, voiceId)`：动态放开 Azure `3.0x` 与 OpenAI/Custom `4.0x` 保存上限、按引擎真实范围渲染音调条、隐藏豆包 `bigtts` 与纯大模型无效原生音调及非流式开关，并附带清晰机制说明。
+4. **Qodo CLI 审查与最终验证闭环（`origin/main` @ `1c1398df2`）**：
+   - **Qodo 审查**（`operation_id: 43ac1053-0ad7-49be-a4d8-d2e666e7ff80`）：0 项阻塞（`action_required`），识别出 3 项新增改进建议（`Gemini/MiMo` 系统音调失联、`ProviderEditScreen` 截断 Azure `2.6-3.0x` 语速、豆包 `bigtts` 音调滑块无实际效果），已全部完成架构级修复并新增对应单测覆盖。
+   - **最终全量门禁与 R8 打包实测**（全部修改后经 `flash` 子代理执行，退出码 `0`）：
+     - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`，91 个 `.kt` 文件 / 11,981 行）。
+     - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 7s`，**37/37 单元测试全部通过**：`:core-model:test` 6、`:core-engine:test` 29、`:app:testCloudDebugUnitTest` 2；`Detekt` 0 issues；`Lint` 0 errors）。
+     - `cloud` R8 APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `1,828,249` 字节（约 `1.74 MiB`），`apksigner` 校验通过（退出码 `0`）。
+     - `full` R8 APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `25,502,331` 字节（约 `24.32 MiB`），`apksigner` 校验通过（退出码 `0`）。

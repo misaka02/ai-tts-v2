@@ -2,6 +2,7 @@ package com.aitts.v2.engine.provider
 
 import com.aitts.v2.engine.audio.PcmFrameAligner
 import com.aitts.v2.engine.network.HttpClientManager
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.PresetVoices
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -207,13 +208,16 @@ class OpenAiCompatibleProvider(
         format: String
     ): Request {
         val url = resolveSpeechUrl(cfg.baseUrl)
+        val model = cfg.modelName.ifBlank { "tts-1" }
+        val supportsInstructions = !model.equals("tts-1", ignoreCase = true) &&
+            !model.equals("tts-1-hd", ignoreCase = true)
         val payload = buildJsonObject {
-            put("model", cfg.modelName.ifBlank { "tts-1" })
+            put("model", model)
             put("input", text)
             put("voice", cfg.voiceId.ifBlank { "nova" })
             put("response_format", format)
-            put("speed", cfg.speed)
-            if (cfg.promptInstruction.isNotBlank()) {
+            put("speed", AcousticMapper.openAiSpeed(cfg.speed))
+            if (supportsInstructions && cfg.promptInstruction.isNotBlank()) {
                 put("instructions", cfg.promptInstruction.trim())
             }
         }.toString()

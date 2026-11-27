@@ -6,10 +6,12 @@ package com.aitts.v2.engine.audio
 class SonicSpeedScaler(
     sampleRate: Int,
     channels: Int,
-    speed: Float
+    speed: Float,
+    pitch: Float = 1.0f
 ) {
     private val sonic = Sonic(sampleRate, channels).apply {
         this.speed = speed.coerceIn(0.25f, 3.0f)
+        this.pitch = pitch.coerceIn(0.5f, 2.0f)
     }
 
     fun processChunk(pcm16: ByteArray): ByteArray {
@@ -32,9 +34,17 @@ class SonicSpeedScaler(
     }
 
     companion object {
-        fun scaleBatch(pcm16: ByteArray, sampleRate: Int, channels: Int, speed: Float): ByteArray {
-            if (pcm16.isEmpty() || kotlin.math.abs(speed - 1.0f) < 0.03f) return pcm16
-            val scaler = SonicSpeedScaler(sampleRate, channels, speed)
+        fun scaleBatch(
+            pcm16: ByteArray,
+            sampleRate: Int,
+            channels: Int,
+            speed: Float,
+            pitch: Float = 1.0f
+        ): ByteArray {
+            val noSpeed = kotlin.math.abs(speed - 1.0f) < 0.03f
+            val noPitch = kotlin.math.abs(pitch - 1.0f) < 0.03f
+            if (pcm16.isEmpty() || (noSpeed && noPitch)) return pcm16
+            val scaler = SonicSpeedScaler(sampleRate, channels, speed, pitch)
             val head = scaler.processChunk(pcm16)
             val tail = scaler.flush()
             return if (tail.isEmpty()) head else head + tail

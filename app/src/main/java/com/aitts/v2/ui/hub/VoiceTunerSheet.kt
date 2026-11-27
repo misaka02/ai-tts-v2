@@ -21,10 +21,13 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.aitts.v2.model.AcousticMapper
+import com.aitts.v2.model.ProviderDescriptorRegistry
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.ui.theme.InkPaperCard
 
@@ -41,6 +44,10 @@ fun VoiceTunerSheet(
     onFullEdit: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val descriptor = remember(provider.type) { ProviderDescriptorRegistry.descriptorFor(provider.type) }
+    val acoustic = descriptor.acousticSpec
+    val speedRange = acoustic.speedSliderRange
+    val showPitch = AcousticMapper.supportsNativePitch(provider.type, provider.voiceId)
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding(),
@@ -49,16 +56,39 @@ fun VoiceTunerSheet(
             Text("声线快速调音 · ${provider.name}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             InkPaperCard(padding = 14.dp) {
                 Text("节点语速 ${"%.2f".format(provider.speed)}×", style = MaterialTheme.typography.labelMedium)
-                Slider(value = provider.speed, onValueChange = onSpeedChange, valueRange = 0.4f..2.5f)
-                Text("节点音调 ${"%.2f".format(provider.pitch)}", style = MaterialTheme.typography.labelMedium)
-                Slider(value = provider.pitch, onValueChange = onPitchChange, valueRange = 0.5f..2.0f)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("启用原生流式推流", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = provider.isStreamingEnabled, onCheckedChange = onStreamingChange)
+                Slider(
+                    value = provider.speed.coerceIn(speedRange.start, speedRange.endInclusive),
+                    onValueChange = onSpeedChange,
+                    valueRange = speedRange
+                )
+                Text(
+                    acoustic.speedModeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (showPitch) {
+                    acoustic.pitchRange?.let { pRange ->
+                        val safePitch = provider.pitch.coerceIn(pRange.start, pRange.endInclusive)
+                        Text("节点音调 ${"%.2f".format(safePitch)}", style = MaterialTheme.typography.labelMedium)
+                        Slider(value = safePitch, onValueChange = onPitchChange, valueRange = pRange)
+                        if (acoustic.pitchHint.isNotBlank()) {
+                            Text(
+                                acoustic.pitchHint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                if (descriptor.supportsStreaming) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("启用原生流式推流", style = MaterialTheme.typography.bodyMedium)
+                        Switch(checked = provider.isStreamingEnabled, onCheckedChange = onStreamingChange)
+                    }
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

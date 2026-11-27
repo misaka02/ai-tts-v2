@@ -1,6 +1,7 @@
 package com.aitts.v2.engine.provider
 
 import com.aitts.v2.engine.network.HttpClientManager
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.PresetVoices
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -66,7 +67,7 @@ class FishAudioTtsProvider(
                 put("reference_id", cfg.voiceId.ifBlank { "7f92f8afb8ec43bf81429cc1c9199cb1" })
                 put("format", if (cfg.audioFormat.equals("wav", ignoreCase = true)) "wav" else "mp3")
                 put("latency", latency)
-                put("prosody", buildJsonObject { put("speed", cfg.speed.coerceIn(0.5f, 2.0f)) })
+                put("prosody", buildJsonObject { put("speed", AcousticMapper.fishSpeed(cfg.speed)) })
                 put("streaming", false)
             }.toString()
 

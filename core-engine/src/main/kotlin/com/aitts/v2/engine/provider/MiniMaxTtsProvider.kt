@@ -3,6 +3,7 @@ package com.aitts.v2.engine.provider
 import com.aitts.v2.engine.audio.PcmFrameAligner
 import com.aitts.v2.engine.network.HttpClientManager
 import com.aitts.v2.engine.network.SseReader
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.PresetVoices
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -177,7 +178,8 @@ class MiniMaxTtsProvider(
         sampleRate: Int
     ): Request {
         val url = cfg.baseUrl.trim().ifBlank { DEFAULT_TTS_URL }
-        val pitchVal = ((cfg.pitch - 1.0f) * 12).toInt().coerceIn(-12, 12)
+        val safeSpeed = AcousticMapper.minimaxSpeed(cfg.speed)
+        val pitchVal = AcousticMapper.minimaxPitchSemitones(cfg.pitch)
         val emotion = cfg.extraParams["emotion"]?.trim().orEmpty()
         val payload = buildJsonObject {
             put("model", cfg.modelName.ifBlank { "speech-02-turbo" })
@@ -185,7 +187,7 @@ class MiniMaxTtsProvider(
             put("stream", stream)
             put("voice_setting", buildJsonObject {
                 put("voice_id", cfg.voiceId.ifBlank { "male-qn-qingse" })
-                put("speed", cfg.speed)
+                put("speed", safeSpeed)
                 put("vol", 1.0)
                 put("pitch", pitchVal)
                 if (emotion.isNotBlank()) put("emotion", emotion)

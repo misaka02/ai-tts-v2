@@ -41,8 +41,8 @@ class GeminiTtsProvider(
     override val type = ProviderType.GEMINI
     override val capabilities = ProviderCapabilities(
         supportsNativePcmStreaming = true,
-        supportsNativeSpeedInBatch = true,
-        supportsNativeSpeedInStream = true,
+        supportsNativeSpeedInBatch = false,
+        supportsNativeSpeedInStream = false,
         supportsDirectorPrompt = true,
         supportsVoiceDiscovery = false,
         supportsModelDiscovery = true
@@ -265,19 +265,7 @@ class GeminiTtsProvider(
     }.getOrNull() ?: bodyStr.take(300)
 
     private fun buildPrompt(cfg: TtsProviderConfig): String {
-        val parts = mutableListOf<String>()
-        cfg.promptInstruction.trim().takeIf { it.isNotBlank() }?.let { parts.add(it) }
-        parts.add(
-            when {
-                cfg.speed <= 0.65f -> "Speak at an extremely slow, calm pace."
-                cfg.speed <= 0.85f -> "Speak at a slower, measured pace."
-                cfg.speed <= 1.10f -> "Speak at a natural, fluent pace."
-                cfg.speed <= 1.35f -> "Speak at a brisk, lively pace."
-                else -> "Speak at a rapid, agile pace."
-            }
-        )
-        if (cfg.pitch <= 0.85f) parts.add("Use a lower, deeper tone.")
-        else if (cfg.pitch >= 1.15f) parts.add("Use a higher, brighter tone.")
-        return "Instruction: ${parts.joinToString(" ")}"
+        val clean = cfg.promptInstruction.trim()
+        return if (clean.isNotBlank()) "Instruction: $clean" else ""
     }
 }

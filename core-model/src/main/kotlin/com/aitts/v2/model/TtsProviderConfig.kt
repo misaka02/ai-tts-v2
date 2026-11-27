@@ -28,24 +28,21 @@ data class TtsProviderConfig(
     val extraParams: Map<String, String> = emptyMap()
 ) {
     /**
+     * Splits requested speed into vendor-compliant upstream speed and client Sonic residual factor.
+     */
+    fun resolveSpeed(
+        isStreaming: Boolean,
+        capabilities: ProviderCapabilities
+    ): SpeedResolution = AcousticMapper.resolveSpeed(this, isStreaming, capabilities)
+
+    /**
      * Determines whether client-side Sonic speed scaling is required for the given transport mode.
-     * Single source of truth: if the engine natively applies speed in that mode, client leaves audio untouched.
+     * Single source of truth: covers both non-native engines and out-of-range residual speeds.
      */
     fun requiresClientSpeedScaling(
         isStreaming: Boolean,
         capabilities: ProviderCapabilities
-    ): Boolean {
-        if (kotlin.math.abs(speed - 1.0f) < 0.03f) return false
-        return when (type) {
-            ProviderType.CUSTOM_HTTP -> {
-                !customPayloadTemplate.contains("\${speed}") && !baseUrl.contains("\${speed}")
-            }
-            else -> {
-                if (isStreaming) !capabilities.supportsNativeSpeedInStream
-                else !capabilities.supportsNativeSpeedInBatch
-            }
-        }
-    }
+    ): Boolean = resolveSpeed(isStreaming, capabilities).needsClientSonic
 
     companion object {
         const val DEFAULT_CUSTOM_PAYLOAD =

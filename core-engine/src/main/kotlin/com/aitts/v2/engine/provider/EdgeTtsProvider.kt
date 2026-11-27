@@ -2,6 +2,7 @@ package com.aitts.v2.engine.provider
 
 import com.aitts.v2.engine.manifest.RemoteManifestRepository
 import com.aitts.v2.engine.network.HttpClientManager
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.PresetVoices
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -152,10 +153,8 @@ class EdgeTtsProvider(
     ): WebSocketListener = object : WebSocketListener() {
         override fun onOpen(ws: WebSocket, response: Response) {
             val timestamp = formattedUtcDate()
-            val ratePct = ((cfg.speed - 1.0f) * 100).toInt()
-            val pitchPct = ((cfg.pitch - 1.0f) * 100).toInt()
-            val rateStr = if (ratePct >= 0) "+$ratePct%" else "$ratePct%"
-            val pitchStr = if (pitchPct >= 0) "+$pitchPct%" else "$pitchPct%"
+            val rateStr = AcousticMapper.edgeSsmlRate(cfg.speed)
+            val pitchStr = AcousticMapper.edgeSsmlPitchHz(cfg.pitch)
             val voiceName = formatEdgeVoiceName(cfg.voiceId.ifBlank { "zh-CN-XiaoxiaoNeural" })
 
             val configMsg = "X-Timestamp:$timestamp\r\nContent-Type:application/json; charset=utf-8\r\n" +

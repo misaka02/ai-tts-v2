@@ -1,6 +1,7 @@
 package com.aitts.v2.engine.provider
 
 import com.aitts.v2.engine.network.HttpClientManager
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.PresetVoices
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -135,10 +136,8 @@ class AzureTtsProvider(
 
     private fun buildSsml(voice: String, text: String, cfg: TtsProviderConfig): String {
         val xmlLang = extractXmlLang(voice)
-        val ratePct = ((cfg.speed - 1.0f) * 100).toInt()
-        val pitchPct = ((cfg.pitch - 1.0f) * 100).toInt()
-        val rateStr = if (ratePct >= 0) "+$ratePct%" else "$ratePct%"
-        val pitchStr = if (pitchPct >= 0) "+$pitchPct%" else "$pitchPct%"
+        val rateStr = AcousticMapper.azureSsmlRate(cfg.speed)
+        val pitchStr = AcousticMapper.azureSsmlPitchPct(cfg.pitch)
         val inner = "<prosody rate='$rateStr' pitch='$pitchStr'>${escapeXml(text)}</prosody>"
 
         val style = cfg.extraParams["style"]?.trim().orEmpty()

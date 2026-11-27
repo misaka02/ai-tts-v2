@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.ProviderCredentials
 import com.aitts.v2.model.ProviderDescriptorRegistry
 import com.aitts.v2.model.ProviderType
@@ -90,23 +91,28 @@ fun ProviderEditScreen(
 
     val descriptor = remember(type) { ProviderDescriptorRegistry.descriptorFor(type) }
 
-    fun buildDraft(): TtsProviderConfig = initial.copy(
-        type = type,
-        name = name.trim().ifBlank { type.displayName },
-        baseUrl = baseUrl.trim(),
-        modelName = modelName.trim(),
-        voiceId = voiceId.trim(),
-        speed = speed,
-        pitch = pitch,
-        sampleRate = sampleRate.toIntOrNull() ?: 24000,
-        audioFormat = audioFormat.trim().ifBlank { "mp3" },
-        isStreamingEnabled = streaming && descriptor.supportsStreaming,
-        promptInstruction = prompt.trim(),
-        customHeadersJson = customHeaders.ifBlank { "{}" },
-        customPayloadTemplate = customPayload,
-        responseAudioPath = responsePath.trim(),
-        extraParams = extraParams
-    )
+    fun buildDraft(): TtsProviderConfig {
+        val acoustic = descriptor.acousticSpec
+        val speedRange = acoustic.speedSliderRange
+        val pitchRange = if (AcousticMapper.supportsNativePitch(type, voiceId.trim())) acoustic.pitchRange else null
+        return initial.copy(
+            type = type,
+            name = name.trim().ifBlank { type.displayName },
+            baseUrl = baseUrl.trim(),
+            modelName = modelName.trim(),
+            voiceId = voiceId.trim(),
+            speed = speed.coerceIn(speedRange.start, speedRange.endInclusive),
+            pitch = if (pitchRange != null) pitch.coerceIn(pitchRange.start, pitchRange.endInclusive) else 1.0f,
+            sampleRate = sampleRate.toIntOrNull() ?: 24000,
+            audioFormat = audioFormat.trim().ifBlank { "mp3" },
+            isStreamingEnabled = streaming && descriptor.supportsStreaming,
+            promptInstruction = prompt.trim(),
+            customHeadersJson = customHeaders.ifBlank { "{}" },
+            customPayloadTemplate = customPayload,
+            responseAudioPath = responsePath.trim(),
+            extraParams = extraParams
+        )
+    }
 
     LaunchedEffect(type) {
         viewModel.loadVoicesAndModels(buildDraft(), ProviderCredentials(apiKey, secondaryKey), forceRefresh = false)
@@ -210,11 +216,39 @@ fun ProviderEditScreen(
 
             InkSectionHeader("声学调节与厂商参数")
             InkPaperCard(padding = 14.dp) {
+                val acoustic = descriptor.acousticSpec
+                val speedRange = acoustic.speedSliderRange
+                val showPitch = AcousticMapper.supportsNativePitch(type, voiceId)
                 Text("语速 ${"%.2f".format(speed)}×", style = MaterialTheme.typography.labelMedium)
-                Slider(value = speed, onValueChange = { speed = it }, valueRange = 0.4f..2.5f)
-                if (descriptor.supportsPitch) {
-                    Text("音调 ${"%.2f".format(pitch)}", style = MaterialTheme.typography.labelMedium)
-                    Slider(value = pitch, onValueChange = { pitch = it }, valueRange = 0.5f..2.0f)
+                Slider(
+                    value = speed.coerceIn(speedRange.start, speedRange.endInclusive),
+                    onValueChange = { speed = it },
+                    valueRange = speedRange
+                )
+                Text(
+                    acoustic.speedModeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (showPitch) {
+                    acoustic.pitchRange?.let { pRange ->
+                        val safePitch = pitch.coerceIn(pRange.start, pRange.endInclusive)
+                        Text("音调 ${"%.2f".format(safePitch)}", style = MaterialTheme.typography.labelMedium)
+                        Slider(value = safePitch, onValueChange = { pitch = it }, valueRange = pRange)
+                        if (acoustic.pitchHint.isNotBlank()) {
+                            Text(
+                                acoustic.pitchHint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else if (type == ProviderType.DOUBAO) {
+                    Text(
+                        "当前 bigtts 音色由模型自行控制基频；若阅读器传入系统音调将自动走本地 Sonic",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(

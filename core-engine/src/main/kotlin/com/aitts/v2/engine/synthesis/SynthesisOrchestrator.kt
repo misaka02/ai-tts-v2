@@ -162,8 +162,9 @@ class SynthesisOrchestrator(
         }
 
         val enhancer = AudioEnhancer()
-        val scaler = if (segCfg.requiresClientSpeedScaling(isStreaming = true, capabilities = provider.capabilities)) {
-            SonicSpeedScaler(24000, 1, segCfg.speed)
+        val speedPlan = segCfg.resolveSpeed(isStreaming = true, capabilities = provider.capabilities)
+        val scaler = if (speedPlan.needsClientSonic) {
+            SonicSpeedScaler(24000, 1, speedPlan.clientSonicFactor, speedPlan.clientSonicPitch)
         } else {
             null
         }

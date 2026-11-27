@@ -27,10 +27,8 @@ import java.util.Base64
 
 /**
  * Xiaomi MiMo-V2.5-TTS provider.
- * Single speed policy:
- * - Batch mode uses Director speed instruction (capabilities.supportsNativeSpeedInBatch = true).
- * - Streaming SSE emits fixed-clock PCM16, so client Sonic handles speed (supportsNativeSpeedInStream = false),
- *   and Director speed prompt is pinned to standard cadence to prevent double speed scaling.
+ * Uses pure LLM style/director prompting; numeric playback speed is consistently handled
+ * by client Sonic so batch and SSE streaming deliver identical speed accuracy without double scaling.
  */
 class MimoTtsProvider(
     private val httpManager: HttpClientManager
@@ -39,7 +37,7 @@ class MimoTtsProvider(
     override val type = ProviderType.MIMO
     override val capabilities = ProviderCapabilities(
         supportsNativePcmStreaming = true,
-        supportsNativeSpeedInBatch = true,
+        supportsNativeSpeedInBatch = false,
         supportsNativeSpeedInStream = false,
         supportsDirectorPrompt = true,
         supportsVoiceDiscovery = false,
@@ -180,7 +178,7 @@ class MimoTtsProvider(
         format: String
     ): Request {
         val url = resolveEndpoint(cfg.baseUrl)
-        val directorPrompt = buildDirectorPrompt(cfg, includeSpeedClause = !stream)
+        val directorPrompt = buildDirectorPrompt(cfg)
         val payload = buildJsonObject {
             put("model", cfg.modelName.ifBlank { "mimo-v2.5-tts" })
             put("messages", buildJsonArray {
@@ -196,7 +194,6 @@ class MimoTtsProvider(
             put("audio", buildJsonObject {
                 put("format", format)
                 put("voice", cfg.voiceId.ifBlank { "茉莉" })
-                if (!stream) put("speed", cfg.speed)
             })
             put("stream", stream)
         }.toString()
@@ -220,27 +217,6 @@ class MimoTtsProvider(
         }
     }
 
-    private fun buildDirectorPrompt(cfg: TtsProviderConfig, includeSpeedClause: Boolean): String {
-        val clauses = mutableListOf<String>()
-        if (includeSpeedClause) {
-            clauses.add(speedClause(cfg.speed))
-        } else {
-            clauses.add("请用标准自然流畅的语速朗读")
-        }
-        when {
-            cfg.pitch <= 0.85f -> clauses.add("声音偏低沉浑厚，富含磁性")
-            cfg.pitch >= 1.15f -> clauses.add("声音偏清脆明亮，高昂悦耳")
-        }
-        cfg.promptInstruction.trim().takeIf { it.isNotBlank() }?.let { clauses.add(it) }
-        return clauses.joinToString("，") + "。"
-    }
-
-    private fun speedClause(speed: Float): String = when {
-        speed <= 0.65f -> "请用极其舒缓柔和的语速朗读，声音沉静从容"
-        speed <= 0.80f -> "请用偏慢从容的语速朗读，节奏平稳"
-        speed <= 0.95f -> "请用稍慢而流畅的语速朗读"
-        speed <= 1.10f -> "请用标准自然流畅的语速朗读"
-        speed <= 1.35f -> "请用稍快轻巧的语速朗读，节奏利落"
-        else -> "请用快速流利的语速朗读，节奏紧凑"
-    }
+    private fun buildDirectorPrompt(cfg: TtsProviderConfig): String =
+        cfg.promptInstruction.trim().ifBlank { "请用自然清晰的语调朗读以下内容。" }
 }

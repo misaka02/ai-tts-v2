@@ -84,4 +84,12 @@ class AudioPipelineTest {
         val (_, totalMb) = cache.getStats()
         assertTrue("Cache size ($totalMb MB) should be trimmed near 1MB limit", totalMb <= 1.1f)
     }
+
+    @Test
+    fun `sonic speed scaler supports pitch shifting cleanly`() {
+        val pcm = ByteArray(4800) { idx -> ((idx * 17) % 120).toByte() }
+        val pitched = SonicSpeedScaler.scaleBatch(pcm, 24000, 1, speed = 1.0f, pitch = 1.4f)
+        assertTrue(pitched.isNotEmpty())
+        assertEquals(0, pitched.size % 2)
+    }
 }

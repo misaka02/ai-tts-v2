@@ -6,6 +6,7 @@ import com.aitts.v2.engine.offline.OfflineModelInstaller
 import com.aitts.v2.engine.provider.ProviderSynthesisRequest
 import com.aitts.v2.engine.provider.SynthesizedAudio
 import com.aitts.v2.engine.provider.TtsProvider
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.ModelArch
 import com.aitts.v2.model.OfflineCatalogData
 import com.aitts.v2.model.OfflineModelSpec
@@ -84,7 +85,7 @@ private class SherpaOfflineProvider(
                 ensureNativeLoaded()
                 val tts = getOrInitTts(spec, threads, silenceScale)
                 val sid = parseSpeakerId(request.config.voiceId)
-                val safeSpeed = request.config.speed.coerceIn(0.5f, 2.5f)
+                val safeSpeed = AcousticMapper.sherpaSpeed(request.config.speed)
                 val generated = tts.generate(request.text, sid, safeSpeed)
                 val samples = generated.samples
                 if (samples.isEmpty()) throw IOException("Sherpa-ONNX 返回空音频采样")

@@ -41,12 +41,15 @@ data class ProviderDescriptor(
     val category: EngineCategory,
     val defaultBaseUrl: String,
     val supportsBaseUrl: Boolean,
-    val supportsPitch: Boolean,
+    val acousticSpec: EngineAcousticSpec,
     val supportsStreaming: Boolean,
     val supportsDirectorPrompt: Boolean,
     val extraParams: List<ProviderParamSpec>,
     val summary: String
-)
+) {
+    val supportsPitch: Boolean
+        get() = acousticSpec.supportsPitch
+}
 
 data class ProviderTemplate(
     val id: String,
@@ -64,20 +67,20 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.TRADITIONAL,
             defaultBaseUrl = "https://speech.platform.bing.com",
             supportsBaseUrl = true,
-            supportsPitch = true,
+            acousticSpec = EngineAcousticSpec(0.5f..2.0f, 0.5f..1.5f, "SSML 音调 -50Hz ~ +50Hz"),
             supportsStreaming = false,
             supportsDirectorPrompt = false,
             extraParams = listOf(
                 ProviderParamSpec.ParamText("gecVersion", "Sec-MS-GEC 版本号", "", "留空使用远程清单或内置版本")
             ),
-            summary = "微软在线神经语音，支持 SSML 语速/音调调节与实时音色列表同步"
+            summary = "微软在线神经语音，支持 SSML 语速/音调(Hz)调节与实时音色列表同步"
         ),
         ProviderDescriptor(
             type = ProviderType.AZURE,
             category = EngineCategory.TRADITIONAL,
             defaultBaseUrl = "https://eastasia.tts.speech.microsoft.com/cognitiveservices/v1",
             supportsBaseUrl = true,
-            supportsPitch = true,
+            acousticSpec = EngineAcousticSpec(0.5f..3.0f, 0.5f..1.5f, "SSML 音调 -50% ~ +50%"),
             supportsStreaming = false,
             supportsDirectorPrompt = false,
             extraParams = listOf(
@@ -91,7 +94,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.TRADITIONAL,
             defaultBaseUrl = "https://openspeech.bytedance.com/api/v1/tts",
             supportsBaseUrl = true,
-            supportsPitch = true,
+            acousticSpec = EngineAcousticSpec(0.5f..2.0f, 0.5f..1.5f, "标准音色 0.5~1.5 (bigtts 自动省略)"),
             supportsStreaming = false,
             supportsDirectorPrompt = false,
             extraParams = listOf(
@@ -111,7 +114,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.TRADITIONAL,
             defaultBaseUrl = "https://api.fish.audio/v1/tts",
             supportsBaseUrl = true,
-            supportsPitch = false,
+            acousticSpec = EngineAcousticSpec(0.5f..2.0f, null),
             supportsStreaming = false,
             supportsDirectorPrompt = false,
             extraParams = listOf(
@@ -124,7 +127,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.TRADITIONAL,
             defaultBaseUrl = "",
             supportsBaseUrl = false,
-            supportsPitch = false,
+            acousticSpec = EngineAcousticSpec(0.5f..2.5f, null),
             supportsStreaming = false,
             supportsDirectorPrompt = false,
             extraParams = listOf(
@@ -138,7 +141,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.TRADITIONAL,
             defaultBaseUrl = "http://127.0.0.1:9880/tts",
             supportsBaseUrl = true,
-            supportsPitch = true,
+            acousticSpec = EngineAcousticSpec(0.25f..4.0f, 0.5f..2.0f, "通过 \${pitch} 占位符透传"),
             supportsStreaming = false,
             supportsDirectorPrompt = true,
             extraParams = emptyList(),
@@ -149,7 +152,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.LLM_GENERATIVE,
             defaultBaseUrl = "https://api.openai.com/v1/audio/speech",
             supportsBaseUrl = true,
-            supportsPitch = false,
+            acousticSpec = EngineAcousticSpec(0.25f..4.0f, null),
             supportsStreaming = true,
             supportsDirectorPrompt = true,
             extraParams = emptyList(),
@@ -160,7 +163,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.LLM_GENERATIVE,
             defaultBaseUrl = "https://generativelanguage.googleapis.com/v1beta",
             supportsBaseUrl = true,
-            supportsPitch = false,
+            acousticSpec = EngineAcousticSpec(null, null),
             supportsStreaming = true,
             supportsDirectorPrompt = true,
             extraParams = emptyList(),
@@ -171,7 +174,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.LLM_GENERATIVE,
             defaultBaseUrl = "https://api.xiaomimimo.com/v1/chat/completions",
             supportsBaseUrl = true,
-            supportsPitch = false,
+            acousticSpec = EngineAcousticSpec(null, null),
             supportsStreaming = true,
             supportsDirectorPrompt = true,
             extraParams = emptyList(),
@@ -182,7 +185,7 @@ object ProviderDescriptorRegistry {
             category = EngineCategory.LLM_GENERATIVE,
             defaultBaseUrl = "https://api.minimax.chat/v1/t2a_v2",
             supportsBaseUrl = true,
-            supportsPitch = true,
+            acousticSpec = EngineAcousticSpec(0.5f..2.0f, 0.5f..1.5f, "官方 -12 ~ +12 半音"),
             supportsStreaming = true,
             supportsDirectorPrompt = false,
             extraParams = listOf(

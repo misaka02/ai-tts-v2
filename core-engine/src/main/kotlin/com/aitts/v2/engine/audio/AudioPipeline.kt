@@ -71,8 +71,9 @@ class AudioPipeline(
         settings: GlobalSettings,
         effectiveGain: Float
     ): ByteArray {
-        val scaled = if (config.requiresClientSpeedScaling(isStreaming = false, capabilities = capabilities)) {
-            SonicSpeedScaler.scaleBatch(pcm24kMono, 24000, 1, config.speed)
+        val speedPlan = config.resolveSpeed(isStreaming = false, capabilities = capabilities)
+        val scaled = if (speedPlan.needsClientSonic) {
+            SonicSpeedScaler.scaleBatch(pcm24kMono, 24000, 1, speedPlan.clientSonicFactor, speedPlan.clientSonicPitch)
         } else {
             pcm24kMono
         }

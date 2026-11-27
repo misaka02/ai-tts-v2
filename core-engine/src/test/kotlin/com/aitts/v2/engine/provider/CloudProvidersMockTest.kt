@@ -278,4 +278,101 @@ class CloudProvidersMockTest {
         val req = server.takeRequest()
         assertEquals("/model?page_size=30", req.path)
     }
+
+    @Test
+    fun `acoustic boundaries clamp minimax, azure, doubao bigtts, gemini, mimo, and openai tts-1`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"base_resp":{"status_code":0},"data":{"audio":"0102"}}"""))
+        val mmCfg = TtsProviderConfig(
+            id = "mm",
+            type = ProviderType.MINIMAX,
+            name = "MM",
+            baseUrl = server.url("/v1/t2a_v2").toString(),
+            speed = 2.8f,
+            pitch = 0.5f
+        )
+        assertTrue(MiniMaxTtsProvider(httpManager).synthesize(ProviderSynthesisRequest("a", mmCfg, ProviderCredentials("k"))).isSuccess)
+        val mmReq = server.takeRequest().body.readUtf8()
+        assertTrue(mmReq.contains("\"speed\":2.0"))
+        assertTrue(mmReq.contains("\"pitch\":-12"))
+
+        server.enqueue(MockResponse().setResponseCode(200).setBody("mp3"))
+        val azCfg = TtsProviderConfig(
+            id = "az",
+            type = ProviderType.AZURE,
+            name = "Az",
+            baseUrl = server.url("/cognitiveservices/v1").toString(),
+            speed = 0.25f,
+            pitch = 2.0f
+        )
+        assertTrue(AzureTtsProvider(httpManager).synthesize(ProviderSynthesisRequest("a", azCfg, ProviderCredentials("k"))).isSuccess)
+        val azReq = server.takeRequest().body.readUtf8()
+        assertTrue(azReq.contains("rate='-50%'"))
+        assertTrue(azReq.contains("pitch='+50%'"))
+
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"code":3000,"data":"AQI="}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"code":3000,"data":"AQI="}"""))
+        val dbBigCfg = TtsProviderConfig(
+            id = "db1",
+            type = ProviderType.DOUBAO,
+            name = "DB",
+            baseUrl = server.url("/api/v1/tts").toString(),
+            voiceId = "zh_female_shuangkuaisisi_moon_bigtts",
+            speed = 2.5f,
+            pitch = 1.9f,
+            extraParams = mapOf("appId" to "12345")
+        )
+        assertTrue(DoubaoTtsProvider(httpManager).synthesize(ProviderSynthesisRequest("a", dbBigCfg, ProviderCredentials("k"))).isSuccess)
+        val dbBigReq = server.takeRequest().body.readUtf8()
+        assertTrue(dbBigReq.contains("\"speed_ratio\":2.0"))
+        assertFalse(dbBigReq.contains("\"pitch_ratio\""))
+
+        val dbStdCfg = dbBigCfg.copy(voiceId = "BV001_streaming", speed = 1.2f, pitch = 1.3f)
+        assertTrue(DoubaoTtsProvider(httpManager).synthesize(ProviderSynthesisRequest("a", dbStdCfg, ProviderCredentials("k"))).isSuccess)
+        assertTrue(server.takeRequest().body.readUtf8().contains("\"pitch_ratio\":1.3"))
+
+        val pcm = Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3, 4))
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"audio/L16;rate=24000","data":"$pcm"}}]}}]}""")
+        )
+        val gemCfg = TtsProviderConfig(
+            id = "g",
+            type = ProviderType.GEMINI,
+            name = "G",
+            baseUrl = server.url("/v1beta").toString(),
+            speed = 1.8f,
+            pitch = 1.5f,
+            promptInstruction = ""
+        )
+        assertTrue(GeminiTtsProvider(httpManager).synthesize(ProviderSynthesisRequest("原文", gemCfg, ProviderCredentials("k"))).isSuccess)
+        val gemReq = server.takeRequest().body.readUtf8()
+        assertFalse(gemReq.contains("rapid"))
+        assertFalse(gemReq.contains("higher, brighter"))
+
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"choices":[{"message":{"audio":{"data":"AQI="}}}]}"""))
+        val mimoCfg = TtsProviderConfig(
+            id = "m",
+            type = ProviderType.MIMO,
+            name = "M",
+            baseUrl = server.url("/v1/chat/completions").toString(),
+            speed = 1.8f,
+            promptInstruction = "温柔朗读"
+        )
+        assertTrue(MimoTtsProvider(httpManager).synthesize(ProviderSynthesisRequest("测试", mimoCfg, ProviderCredentials("k"))).isSuccess)
+        val mimoReq = server.takeRequest().body.readUtf8()
+        assertFalse(mimoReq.contains("\"speed\""))
+        assertTrue(mimoReq.contains("温柔朗读"))
+
+        server.enqueue(MockResponse().setResponseCode(200).setBody("mp3"))
+        val oaiCfg = TtsProviderConfig(
+            id = "o",
+            type = ProviderType.OPENAI_COMPATIBLE,
+            name = "O",
+            baseUrl = server.url("/v1/audio/speech").toString(),
+            modelName = "tts-1",
+            promptInstruction = "should-ignore"
+        )
+        assertTrue(OpenAiCompatibleProvider(httpManager).synthesize(ProviderSynthesisRequest("hi", oaiCfg, ProviderCredentials("k"))).isSuccess)
+        assertFalse(server.takeRequest().body.readUtf8().contains("\"instructions\""))
+    }
 }

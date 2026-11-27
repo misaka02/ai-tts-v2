@@ -1,6 +1,7 @@
 package com.aitts.v2.engine.provider
 
 import com.aitts.v2.engine.network.HttpClientManager
+import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.PresetVoices
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -67,12 +68,15 @@ class DoubaoTtsProvider(
                 })
                 put("user", buildJsonObject { put("uid", "ai_tts_v2") })
                 val emotion = cfg.extraParams["emotion"]?.trim().orEmpty()
+                val voiceType = cfg.voiceId.ifBlank { "zh_female_shuangkuaisisi_moon_bigtts" }
+                val safeSpeed = AcousticMapper.doubaoSpeedRatio(cfg.speed)
+                val safePitch = AcousticMapper.doubaoPitchRatio(cfg.pitch, voiceType)
                 put("audio", buildJsonObject {
-                    put("voice_type", cfg.voiceId.ifBlank { "zh_female_shuangkuaisisi_moon_bigtts" })
+                    put("voice_type", voiceType)
                     put("encoding", if (cfg.audioFormat.equals("wav", ignoreCase = true)) "wav" else "mp3")
-                    put("speed_ratio", cfg.speed)
+                    put("speed_ratio", safeSpeed)
                     put("volume_ratio", 1.0)
-                    put("pitch_ratio", cfg.pitch)
+                    if (safePitch != null) put("pitch_ratio", safePitch)
                     if (emotion.isNotBlank()) put("emotion", emotion)
                 })
                 put("request", buildJsonObject {
