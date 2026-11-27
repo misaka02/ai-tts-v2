@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   verify-and-build:
-    name: Architecture Guard, Tests, Lint & Build
+    name: Architecture Guard, Tests, Lint & R8 Release Build
     runs-on: ubuntu-latest
 
     steps:
@@ -42,20 +42,22 @@ jobs:
       - name: Detekt, Unit Tests & Lint
         run: ./gradlew detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug --no-daemon
 
-      - name: Build Debug APKs (cloud & full)
-        run: ./gradlew :app:assembleCloudDebug :app:assembleFullDebug --no-daemon
+      - name: Build R8 Release APKs (cloud & full)
+        run: ./gradlew assembleR8Release --no-daemon
 
-      - name: Build Release APKs on tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: ./gradlew :app:assembleCloudRelease :app:assembleFullRelease --no-daemon
+      - name: Upload R8 Release APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aitts-v2-r8-release-apks
+          path: app/build/outputs/apk/*/release/*.apk
 
       - name: Prepare Release Assets
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           mkdir -p release_apks
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          cp app/build/outputs/apk/cloud/release/*.apk "release_apks/ai-tts-cloud-${TAG_NAME}.apk"
-          cp app/build/outputs/apk/full/release/*.apk "release_apks/ai-tts-full-arm64-${TAG_NAME}.apk"
+          cp app/build/outputs/apk/cloud/release/*.apk "release_apks/ai-tts-v2-cloud-${TAG_NAME}.apk"
+          cp app/build/outputs/apk/full/release/*.apk "release_apks/ai-tts-v2-full-arm64-${TAG_NAME}.apk"
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
