@@ -23,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.aitts.v2.model.SpeechHistoryItem
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.ui.theme.InkPaperCard
 import com.aitts.v2.ui.theme.InkStatusPill
@@ -66,54 +65,6 @@ fun SleepTimerDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistorySheet(
-    history: List<SpeechHistoryItem>,
-    onSelect: (SpeechHistoryItem) -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("最近朗读记录 (${history.size})", style = MaterialTheme.typography.titleMedium)
-                if (history.isNotEmpty()) {
-                    TextButton(onClick = onClear) { Text("清空") }
-                }
-            }
-            if (history.isEmpty()) {
-                Text(
-                    "暂无朗读记录，点击开始朗读后将自动留存。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 24.dp)
-                )
-            } else {
-                Text("点击任意记录可回填至听书台继续试听", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(history, key = { it.id }) { item ->
-                        InkPaperCard(padding = 12.dp, onClick = { onSelect(item) }) {
-                            Text(item.text, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-                            Text(
-                                "${item.providerName} · ${item.voiceId} · ${item.characterCount}字 · ${item.costMs}ms",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 fun QuickProviderPickerSheet(
     providers: List<TtsProviderConfig>,
     activeId: String,
@@ -132,7 +83,7 @@ fun QuickProviderPickerSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("快速切换声线", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                TextButton(onClick = onManageAll) { Text("管理全部声库") }
+                TextButton(onClick = onManageAll) { Text("管理声库") }
             }
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(providers, key = { it.id }) { provider ->
@@ -151,9 +102,7 @@ fun QuickProviderPickerSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (isActive) {
-                                InkStatusPill("使用中", PillTone.ACCENT)
-                            }
+                            if (isActive) InkStatusPill("使用中", PillTone.ACCENT)
                         }
                     }
                 }

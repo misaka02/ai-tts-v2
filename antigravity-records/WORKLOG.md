@@ -98,3 +98,26 @@
    - 将「每次完成 Android 编译验收后默认发布 GitHub Pre-release（仅明确要求时才发正式版）」写入全局 `GEMINI.md` 与两份 `AGENTS.md`。
    - 更新 [.github/workflows/ci.yml](../.github/workflows/ci.yml) 支持连字符预发布标签自动标记 `prerelease: true`。
    - 推送标签 `v2.1.0-pre.1` 并发布 GitHub Pre-release：`https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1`（`isPrerelease: true`，附带 `ai-tts-v2-cloud-v2.1.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.1.0-pre.1.apk`）。
+
+## 7. 精简重构、传统/AI引擎差异化与上游实时同步 (`v2.1.0-pre.2`, 2026-11-27)
+1. **清理负优化与华而不实功能**：
+   - 删除关键词猜情感/对话分段与双声部配音：`DialogueAnalyzer.kt`、`AcronymNormalizer.kt`、`DialogueSegmenter.kt` 与 `DualRole`/`dialogueVoiceId`/`volume`/`tags`。
+   - 移除 4 套伪 DSP 音效预设（`CLARITY`/`WARM`/`NIGHT_PROTECT`/`CUSTOM` tanh 染色），保留无损直通 + 静音裁剪 + 睡眠定时淡出。
+   - 移除 50 条写盘朗读历史、`aitts://` 口令分享、默认错别字多音字表（保留可手动开启的中文数字规范化，默认 `false`）及 13 个未配置预置节点，初始仅保留 1 个开箱即用的 `Edge TTS (晓晓)`。
+   - 保留用户指定的 **一言 (`QuoteRepository.fetchOnlineQuote`)** 联网试听与 **极简系统自适应深浅色悬浮字幕**（[FloatingSubtitleOverlay.kt](../app/src/main/java/com/aitts/v2/service/FloatingSubtitleOverlay.kt)，移除 6 套纸张主题与色板，保留纵坐标拖拽持久化、单击展开、位置锁定及透明度/字号/对齐微调）。
+2. **可扩展契约与传统 vs 大模型差异化调控**：
+   - `:core-model` 新增 [ProviderDescriptor.kt](../core-model/src/main/kotlin/com/aitts/v2/model/ProviderDescriptor.kt)（`EngineCategory.TRADITIONAL` vs `LLM_GENERATIVE` 与 `ProviderParamSpec` 元数据目录）、[ProviderTemplates.kt](../core-model/src/main/kotlin/com/aitts/v2/model/ProviderTemplates.kt) 与 [SentenceSegment.kt](../core-model/src/main/kotlin/com/aitts/v2/model/SentenceSegment.kt)；[VoiceAndRules.kt](../core-model/src/main/kotlin/com/aitts/v2/model/VoiceAndRules.kt) 为 `VoiceModel` 增加 `styles`。
+   - `:core-engine` 新增可扩展契约 [PipelineContracts.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/pipeline/PipelineContracts.kt)（`TextProcessor` / `AudioProcessor`）与 [TextSegmenter.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/text/TextSegmenter.kt)。
+   - 传统引擎参数落地：Edge 实时 `/voices/list` 与 `gecVersion` 热更；Azure 实时拉取 `StyleList` 与 SSML `<mstts:express-as style="..." styledegree="...">`；豆包 `emotion`；Fish 动态路由 `/model?page_size=30` 与 `latency`；Sherpa 线程数（1..4）与 `silenceScale`；Custom HTTP 自定义 Headers 与一键 GPT-SoVITS/CosyVoice 模板。
+   - AI 大模型参数落地：OpenAI 兼容 `instructions` 与 `/models` + `/audio/voice/list` 自动发现；MiniMax `POST /v1/get_voice`（含复刻/系统音色）与 `voice_setting.emotion`；Gemini / MiMo 原生提示词与 SSE 低延迟流式控制；按 `TtsProvider` 类型隔离硅基流动与 OpenAI 模板主机。
+3. **上游清单实时同步与 4 项实用能力补齐**：
+   - 新增 [catalog/manifest.json](../catalog/manifest.json)、[RemoteManifestRepository.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/manifest/RemoteManifestRepository.kt)（含 HTTPS + 官方域名白名单校验、离线模型安全 ID 与大小过滤、`ghfast.top` 镜像回退）与 24h 按凭据指纹隔离的 [UpstreamDiscovery.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/provider/UpstreamDiscovery.kt)（`DiscoveryCatalog` / `DiscoveryDiskCache`）。
+   - 新增外部分享/划词“AI 朗读”（[MainActivity.kt](../app/src/main/java/com/aitts/v2/ui/MainActivity.kt) `ACTION_SEND` / `ACTION_PROCESS_TEXT` + [AppContainer.kt](../app/src/main/java/com/aitts/v2/di/AppContainer.kt) 缓冲 `Channel` + [AiTtsAppRoot.kt](../app/src/main/java/com/aitts/v2/ui/navigation/AiTtsAppRoot.kt) 自动跳转听书台）、系统官方 `TextToSpeech` 端到端自检（[SystemTtsSelfTester.kt](../app/src/main/java/com/aitts/v2/service/SystemTtsSelfTester.kt)）、通知栏快捷磁贴（[AiTtsQuickTileService.kt](../app/src/main/java/com/aitts/v2/service/AiTtsQuickTileService.kt)），以及声库卡片一键试听、模板弹窗创建与离线模型下载后一键启用。
+4. **Qodo CLI 两轮审查与全部门禁验证（上限 2 轮已收口）**：
+   - **Qodo 第 1 轮**（`operation_id: 96d4532c-93d3-4d26-a8fe-fa73d52756a4`，`origin/main` @ `7164fa1f6`）：识别 6 项新增有效问题（离线清单目录穿越校验、`model_spec.json` 动态离线模型元信息持久化与读取、`DiscoveryDiskCache` 按凭据指纹隔离、`ACTION_SEND` 富文本 `CharSequence` 兼容、全局缓冲 `Channel` 防并发丢请求及外部传入自动切回听书台），当轮全量修复并确认 4 项基线历史条目已解决。
+   - **Qodo 第 2 轮增量复核**（`operation_id: def01fd9-bbd7-4d27-899c-c1b198ffa487`）：确认第 1 轮全部 6 项问题均为 `resolved`；随后批量修复第 2 轮指出的 6 项新细节（`RemoteManifestRepository` 官方域名白名单校验防止密钥外泄、`ProvidersViewModel` 保留硅基流动兼容端点且展示已装脱离清单离线模型、`OfflineModelInstaller` 下载/解压安全体积上限防爆盘、`ProviderEditScreen` 切换类型完整复位残留字段、`SettingsViewModel` 异步动作 `finally` 复位忙状态）并新增单测覆盖。
+   - **最终离线全量门禁与 R8 打包实测**（全部修改完成后通过 `flash` 轻量子代理执行）：
+     - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`，90 个 `.kt` 文件 / 11,785 行）。
+     - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 1m 56s`），**34/34 单元测试全部通过**（`:core-model:test` 5、`:core-engine:test` 27、`:app:testCloudDebugUnitTest` 2），`Detekt` 0 issues，`Lint` 0 errors。
+     - `cloud` R8 Release APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk` — `1,828,249` 字节（约 `1.74 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。
+     - `full` R8 Release APK：`app/build/outputs/apk/full/release/app-full-release.apk` — `25,502,331` 字节（约 `24.32 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。

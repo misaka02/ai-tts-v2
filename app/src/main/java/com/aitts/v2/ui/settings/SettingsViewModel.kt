@@ -10,13 +10,14 @@ import com.aitts.v2.model.LogEntry
 import com.aitts.v2.model.RequestLogSession
 import com.aitts.v2.permission.AppPermissionState
 import com.aitts.v2.permission.PermissionHelper
+import com.aitts.v2.service.SystemTtsSelfTester
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -32,6 +33,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _isBusy = MutableStateFlow(false)
+    val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
     private val _permissionState = MutableStateFlow(
         AppPermissionState(
@@ -68,8 +72,40 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun clearCache() {
         container.diskCache.clearAll()
+        container.discoveryCache.clear()
         refreshCacheStats()
-        _message.value = "音频缓存已清空"
+        _message.value = "音频与发现缓存已清空"
+    }
+
+    fun syncRemoteManifest() {
+        if (_isBusy.value) return
+        _isBusy.value = true
+        viewModelScope.launch {
+            try {
+                val res = container.manifestRepository.refresh(settingsFlow.value.manifestUrl)
+                _message.value = res.fold(
+                    onSuccess = { m -> "已同步上游清单 v${m.version} (${m.updatedAt})" },
+                    onFailure = { e -> "同步失败: ${e.message}" }
+                )
+            } finally {
+                _isBusy.value = false
+            }
+        }
+    }
+
+    fun runSystemTtsSelfTest(context: Context) {
+        if (_isBusy.value) return
+        _isBusy.value = true
+        viewModelScope.launch {
+            try {
+                val res = SystemTtsSelfTester.runSelfTest(context)
+                _message.value = res.message
+            } catch (t: Throwable) {
+                _message.value = "自检失败: ${t.message ?: t.javaClass.simpleName}"
+            } finally {
+                _isBusy.value = false
+            }
+        }
     }
 
     fun clearLogs() = container.logger.clear()
@@ -89,8 +125,6 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.preferences.resetToDefaults()
         _message.value = "已恢复官方默认设置"
     }
-
-    fun checkPermissions(context: Context): AppPermissionState = PermissionHelper.check(context)
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

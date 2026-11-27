@@ -15,14 +15,8 @@ data class TtsProviderConfig(
     val baseUrl: String = "",
     val modelName: String = "",
     val voiceId: String = "",
-    val dialogueVoiceId: String = "",
-    val maleVoiceId: String = "",
-    val femaleVoiceId: String = "",
-    val elderVoiceId: String = "",
-    val isDualRoleEnabled: Boolean = false,
     val speed: Float = 1.0f,
     val pitch: Float = 1.0f,
-    val volume: Float = 1.0f,
     val sampleRate: Int = 24000,
     val audioFormat: String = "mp3",
     val promptInstruction: String = "",
@@ -31,8 +25,7 @@ data class TtsProviderConfig(
     val customHeadersJson: String = "{}",
     val customPayloadTemplate: String = DEFAULT_CUSTOM_PAYLOAD,
     val responseAudioPath: String = "",
-    val extraParams: Map<String, String> = emptyMap(),
-    val tags: List<String> = emptyList()
+    val extraParams: Map<String, String> = emptyMap()
 ) {
     /**
      * Determines whether client-side Sonic speed scaling is required for the given transport mode.
@@ -67,12 +60,4 @@ data class TtsProviderConfig(
 data class ProviderCredentials(
     val apiKey: String = "",
     val secondaryApiKey: String = ""
-)
-
-/**
- * Combined provider config + credentials used only at synthesis/test execution time.
- */
-data class ResolvedProviderConfig(
-    val config: TtsProviderConfig,
-    val credentials: ProviderCredentials = ProviderCredentials()
 )

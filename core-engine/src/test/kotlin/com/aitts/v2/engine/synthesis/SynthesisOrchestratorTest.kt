@@ -42,7 +42,7 @@ class SynthesisOrchestratorTest {
         val audioPipeline = AudioPipeline { bytes, rate -> Result.success(DecodedPcm(bytes, rate, 1)) }
 
         val slowProvider = object : TtsProvider {
-            override val type = ProviderType.EDGE_TTS
+            override val type = ProviderType.OFFLINE_SHERPA
             override val capabilities = ProviderCapabilities()
             override suspend fun fetchVoices(config: TtsProviderConfig, credentials: ProviderCredentials): List<VoiceModel> = emptyList()
             override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> {
@@ -56,7 +56,7 @@ class SynthesisOrchestratorTest {
         val cfg = TtsProviderConfig(id = "off", type = ProviderType.OFFLINE_SHERPA, name = "Offline")
         val input = SynthesisInput(
             rawText = "测试一句",
-            settings = GlobalSettings(isSentenceSplittingEnabled = false, isAudioCacheEnabled = false),
+            settings = GlobalSettings(isSmartSegmentationEnabled = false, isAudioCacheEnabled = false),
             activeConfig = cfg,
             allProviders = listOf(cfg),
             rules = emptyList(),
@@ -118,7 +118,7 @@ class SynthesisOrchestratorTest {
             "sess1",
             SynthesisInput(
                 rawText = "回退测试",
-                settings = GlobalSettings(isSentenceSplittingEnabled = false, autoRetryOnFailure = false, isAudioCacheEnabled = false),
+                settings = GlobalSettings(isSmartSegmentationEnabled = false, autoRetryOnFailure = false, isAudioCacheEnabled = false),
                 activeConfig = cfg,
                 allProviders = listOf(cfg),
                 rules = emptyList(),
@@ -138,7 +138,7 @@ class SynthesisOrchestratorTest {
     }
 
     @Test
-    fun `streaming synthesis records history item`() = runTest {
+    fun `streaming synthesis completes and logs trace metrics`() = runTest {
         val http = HttpClientManager()
         val logger = EngineLogger()
         val cache = AudioDiskCache(tempFolder.newFolder("cache3"))
@@ -169,24 +169,23 @@ class SynthesisOrchestratorTest {
             voiceId = "v1",
             isStreamingEnabled = true
         )
-        val recorded = mutableListOf<String>()
 
+        var done = false
         orchestrator.execute(
             "sess_stream",
             SynthesisInput(
-                rawText = "流式历史记录校验",
-                settings = GlobalSettings(isSentenceSplittingEnabled = false, isAudioCacheEnabled = false),
+                rawText = "流式播报验证",
+                settings = GlobalSettings(isSmartSegmentationEnabled = false, isAudioCacheEnabled = false),
                 activeConfig = cfg,
                 allProviders = listOf(cfg),
                 rules = emptyList(),
-                credentialsLookup = { ProviderCredentials() },
-                onHistoryRecorded = { item -> recorded.add(item.providerName) }
+                credentialsLookup = { ProviderCredentials() }
             ),
-            recordingSink {}
+            recordingSink { done = true }
         )
 
-        assertEquals(1, recorded.size)
-        assertTrue(recorded.first().contains("流式"))
+        assertTrue(done)
+        assertTrue(logger.entriesFlow.value.any { it.sessionId == "sess_stream" && it.title.contains("合成播音完成") })
     }
 
     private fun recordingSink(onComplete: () -> Unit) = object : SynthesisSink {

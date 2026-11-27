@@ -1,5 +1,6 @@
 package com.aitts.v2.engine.provider
 
+import com.aitts.v2.engine.manifest.RemoteManifestRepository
 import com.aitts.v2.engine.network.HttpClientManager
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
@@ -13,10 +14,11 @@ import java.io.IOException
  */
 class TtsProviderRegistry(
     httpManager: HttpClientManager,
-    offlineProvider: TtsProvider? = null
+    offlineProvider: TtsProvider? = null,
+    gecVersionProvider: () -> String = { RemoteManifestRepository.DEFAULT_EDGE_GEC }
 ) {
     private val providers: Map<ProviderType, TtsProvider> = buildMap {
-        put(ProviderType.EDGE_TTS, EdgeTtsProvider(httpManager))
+        put(ProviderType.EDGE_TTS, EdgeTtsProvider(httpManager, gecVersionProvider = gecVersionProvider))
         put(ProviderType.MIMO, MimoTtsProvider(httpManager))
         put(ProviderType.GEMINI, GeminiTtsProvider(httpManager))
         put(ProviderType.OPENAI_COMPATIBLE, OpenAiCompatibleProvider(httpManager))

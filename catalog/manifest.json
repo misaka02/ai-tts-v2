@@ -1,0 +1,89 @@
+{
+  "version": 2,
+  "updatedAt": "2026-11-27",
+  "edgeGecVersion": "1-143.0.3650.75",
+  "defaultEndpoints": {
+    "EDGE_TTS": "https://speech.platform.bing.com",
+    "AZURE": "https://eastasia.tts.speech.microsoft.com/cognitiveservices/v1",
+    "OPENAI_COMPATIBLE": "https://api.openai.com/v1/audio/speech",
+    "GEMINI": "https://generativelanguage.googleapis.com/v1beta",
+    "MIMO": "https://api.xiaomimimo.com/v1/chat/completions",
+    "MINIMAX": "https://api.minimax.chat/v1/t2a_v2",
+    "DOUBAO": "https://openspeech.bytedance.com/api/v1/tts",
+    "FISH_AUDIO": "https://api.fish.audio/v1/tts"
+  },
+  "offlineModels": [
+    {
+      "id": "vits-piper-zh_CN-chaowen-medium-int8",
+      "name": "Piper 超文中文男声 (INT8 量化)",
+      "arch": "VITS",
+      "category": "轻量量化",
+      "sizeMb": 13,
+      "description": "Piper INT8 量化模型，体积小、功耗低，适合长时间旁白朗读",
+      "speakerCount": 1,
+      "sampleRate": 22050,
+      "defaultVoiceId": "spk_0",
+      "speakers": ["spk_0 (超文男声)"],
+      "githubUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-zh_CN-chaowen-medium-int8.tar.bz2",
+      "mirrorUrl": "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-zh_CN-chaowen-medium-int8.tar.bz2",
+      "tags": ["VITS", "INT8", "13MB"]
+    },
+    {
+      "id": "vits-piper-zh_CN-xiao_ya-medium-int8",
+      "name": "Piper 小雅中文女声 (INT8 量化)",
+      "arch": "VITS",
+      "category": "轻量量化",
+      "sizeMb": 13,
+      "description": "Piper INT8 量化女声模型，吐字清晰轻巧",
+      "speakerCount": 1,
+      "sampleRate": 22050,
+      "defaultVoiceId": "spk_0",
+      "speakers": ["spk_0 (小雅女声)"],
+      "githubUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-zh_CN-xiao_ya-medium-int8.tar.bz2",
+      "mirrorUrl": "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-zh_CN-xiao_ya-medium-int8.tar.bz2",
+      "tags": ["VITS", "INT8", "13MB"]
+    },
+    {
+      "id": "matcha-icefall-zh-baker",
+      "name": "Matcha-Icefall 标贝中文女声",
+      "arch": "MATCHA",
+      "category": "神经架构",
+      "sizeMb": 72,
+      "description": "基于 Flow Matching 的 Matcha-TTS 声学模型 + HiFi-GAN 声码器",
+      "speakerCount": 1,
+      "sampleRate": 22050,
+      "defaultVoiceId": "spk_0",
+      "speakers": ["spk_0 (标贝播音女声)"],
+      "githubUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-zh-baker.tar.bz2",
+      "mirrorUrl": "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-zh-baker.tar.bz2",
+      "tags": ["Matcha", "FlowMatching"]
+    },
+    {
+      "id": "kokoro-int8-multi-lang-v1_0",
+      "name": "Kokoro-82M 多语言模型 (INT8)",
+      "arch": "KOKORO",
+      "category": "多语种",
+      "sizeMb": 126,
+      "description": "82M 参数 INT8 量化多语种语音大模型",
+      "speakerCount": 10,
+      "sampleRate": 24000,
+      "defaultVoiceId": "spk_0",
+      "speakers": [
+        "spk_0 (Kokoro 发音人 0)",
+        "spk_1 (Kokoro 发音人 1)",
+        "spk_2 (Kokoro 发音人 2)",
+        "spk_3 (Kokoro 发音人 3)",
+        "spk_4 (Kokoro 发音人 4)",
+        "spk_5 (Kokoro 发音人 5)",
+        "spk_6 (Kokoro 发音人 6)",
+        "spk_7 (Kokoro 发音人 7)",
+        "spk_8 (Kokoro 发音人 8)",
+        "spk_9 (Kokoro 发音人 9)"
+      ],
+      "githubUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+      "mirrorUrl": "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+      "tags": ["Kokoro", "多语言", "INT8"]
+    }
+  ],
+  "presetVoices": {}
+}

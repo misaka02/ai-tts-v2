@@ -1,16 +1,10 @@
 package com.aitts.v2.engine.synthesis
 
 import com.aitts.v2.engine.audio.AudioEnhancer
-import com.aitts.v2.model.AudioProcessingMode
-import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.ProviderCredentials
 import com.aitts.v2.model.ProviderType
-import com.aitts.v2.model.SegmentRole
-import com.aitts.v2.model.SentenceSegment
-import com.aitts.v2.model.SpeechHistoryItem
 import com.aitts.v2.model.SpeedPolicy
 import com.aitts.v2.model.TtsProviderConfig
-import java.util.UUID
 
 internal object SynthesisHelpers {
 
@@ -24,27 +18,6 @@ internal object SynthesisHelpers {
         return cfg.copy(speed = speed, pitch = pitch)
     }
 
-    fun buildSegmentConfig(base: TtsProviderConfig, seg: SentenceSegment, settings: GlobalSettings): TtsProviderConfig {
-        var cfg = if (!base.isDualRoleEnabled) {
-            base
-        } else {
-            val overrideVoice = when (seg.role) {
-                SegmentRole.ELDER_DIALOGUE -> base.elderVoiceId.ifBlank { base.dialogueVoiceId }
-                SegmentRole.FEMALE_DIALOGUE -> base.femaleVoiceId.ifBlank { base.dialogueVoiceId }
-                SegmentRole.MALE_DIALOGUE -> base.maleVoiceId.ifBlank { base.dialogueVoiceId }
-                SegmentRole.DIALOGUE -> base.dialogueVoiceId
-                SegmentRole.NARRATOR -> ""
-            }
-            if (overrideVoice.isNotBlank()) base.copy(voiceId = overrideVoice) else base
-        }
-        if (settings.isEmotionProsodyEnabled && seg.emotion.promptInstruction.isNotBlank()) {
-            val basePrompt = cfg.promptInstruction.trim()
-            val blended = if (basePrompt.isNotBlank()) "$basePrompt ${seg.emotion.promptInstruction}" else seg.emotion.promptInstruction
-            cfg = cfg.copy(promptInstruction = blended)
-        }
-        return cfg
-    }
-
     fun rotateCredentials(creds: ProviderCredentials, index: Int): ProviderCredentials {
         if (creds.secondaryApiKey.isBlank() || index % 2 == 0) return creds
         return creds.copy(apiKey = creds.secondaryApiKey)
@@ -56,26 +29,11 @@ internal object SynthesisHelpers {
             ?: input.allProviders.find { it.type == ProviderType.EDGE_TTS && it.id != primary.id }
     }
 
-    fun processChunkEnhancement(
+    fun processChunkGain(
         enhancer: AudioEnhancer,
         pcm: ByteArray,
-        settings: GlobalSettings,
         effectiveGain: Float
-    ): ByteArray {
-        val mode = if (kotlin.math.abs(effectiveGain - 1.0f) >= 0.02f &&
-            settings.audioProcessingMode == AudioProcessingMode.PASSTHROUGH
-        ) {
-            AudioProcessingMode.CUSTOM
-        } else {
-            settings.audioProcessingMode
-        }
-        val gain = if (mode == AudioProcessingMode.CUSTOM) {
-            (settings.loudnessGainFactor * effectiveGain).coerceIn(0.05f, 2.5f)
-        } else {
-            effectiveGain
-        }
-        return enhancer.processPcm(pcm, 1, mode, settings.voiceClarityBoostEnabled, gain, trimSilence = false)
-    }
+    ): ByteArray = enhancer.processPcm(pcm, channels = 1, gain = effectiveGain, trimSilence = false)
 
     fun emitInChunks(pcm: ByteArray, sink: SynthesisSink) {
         var off = 0
@@ -97,26 +55,5 @@ internal object SynthesisHelpers {
             sink.onPcmChunk(if (n == buf.size) buf else ByteArray(n))
             rem -= n
         }
-    }
-
-    fun recordHistory(
-        input: SynthesisInput,
-        providerName: String,
-        voiceId: String,
-        text: String,
-        startMs: Long,
-        fallback: Boolean
-    ) {
-        input.onHistoryRecorded(
-            SpeechHistoryItem(
-                id = UUID.randomUUID().toString().take(8),
-                text = text.take(60),
-                providerName = providerName,
-                voiceId = voiceId.ifBlank { "默认" },
-                costMs = System.currentTimeMillis() - startMs,
-                characterCount = text.length,
-                isFallbackUsed = fallback
-            )
-        )
     }
 }

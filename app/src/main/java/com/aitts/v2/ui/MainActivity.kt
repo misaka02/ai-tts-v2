@@ -1,5 +1,6 @@
 package com.aitts.v2.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +24,8 @@ class MainActivity : ComponentActivity() {
         PermissionHelper.requestNotificationIfNeeded(this)
 
         val container = (application as AiTtsApplication).container
+        extractIncomingText(intent)?.let { container.submitIncomingText(it) }
+
         setContent {
             val settings by container.preferences.settingsFlow.collectAsStateWithLifecycle()
             AiTtsTheme(
@@ -35,5 +38,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val container = (application as AiTtsApplication).container
+        extractIncomingText(intent)?.let { container.submitIncomingText(it) }
+    }
+
+    private fun extractIncomingText(intent: Intent?): String? {
+        if (intent == null) return null
+        val text = when (intent.action) {
+            Intent.ACTION_SEND -> intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            Intent.ACTION_PROCESS_TEXT -> intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+            else -> null
+        }
+        return text?.trim()?.takeIf { it.isNotEmpty() }
     }
 }

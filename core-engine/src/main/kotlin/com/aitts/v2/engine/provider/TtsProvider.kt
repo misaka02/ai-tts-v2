@@ -38,6 +38,21 @@ interface TtsProvider {
         credentials: ProviderCredentials
     ): List<String> = listOfNotNull(config.modelName.takeIf { it.isNotBlank() })
 
+    suspend fun discoverCatalog(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): DiscoveryCatalog {
+        val models = fetchModels(config, credentials)
+        val voices = fetchVoices(config, credentials)
+        return DiscoveryCatalog(
+            models = models,
+            voices = voices,
+            stylesByVoice = voices.filter { it.styles.isNotEmpty() }.associate { it.id to it.styles },
+            resolvedEndpoint = config.baseUrl,
+            fromRemote = false
+        )
+    }
+
     suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio>
 
     suspend fun synthesizeStream(

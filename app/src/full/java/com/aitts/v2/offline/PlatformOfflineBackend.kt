@@ -37,8 +37,8 @@ object PlatformOfflineBackend : OfflineTtsBackendFactory {
 }
 
 /**
- * Standard, reflection-free Sherpa-ONNX offline TTS provider for the `full` arm64 flavor.
- * Dispatches strictly on explicit [OfflineModelSpec.arch] (VITS / MATCHA / KOKORO / ZIPVOICE).
+ * Reflection-free Sherpa-ONNX offline TTS provider for the `full` arm64 flavor.
+ * Supports configurable `numThreads` (1..4) and `silenceScale` (0.0..1.0) via `extraParams`.
  */
 private class SherpaOfflineProvider(
     private val installer: OfflineModelInstaller
@@ -51,11 +51,13 @@ private class SherpaOfflineProvider(
     )
 
     private val lock = Any()
-    private var loadedModelId: String? = null
+    private var loadedConfigKey: String? = null
     private var currentTts: OfflineTts? = null
 
     override suspend fun fetchVoices(config: TtsProviderConfig, credentials: ProviderCredentials): List<VoiceModel> {
-        val spec = OfflineCatalogData.findById(config.modelName) ?: OfflineCatalogData.models.first()
+        val spec = OfflineCatalogData.findById(config.modelName)
+            ?: installer.readInstalledSpec(config.modelName)
+            ?: OfflineCatalogData.models.first()
         return spec.speakers.mapIndexed { idx, label -> VoiceModel("spk_$idx", label) }
     }
 
@@ -66,17 +68,21 @@ private class SherpaOfflineProvider(
         withContext(Dispatchers.IO) {
             val modelId = request.config.modelName.ifBlank { OfflineCatalogData.models.first().id }
             val spec = OfflineCatalogData.findById(modelId)
+                ?: installer.readInstalledSpec(modelId)
                 ?: return@withContext Result.failure(IOException("未知的离线模型 ID: $modelId"))
 
             if (!installer.isModelInstalled(modelId)) {
                 return@withContext Result.failure(
-                    IOException("离线模型【${spec.name}】尚未下载 (${spec.sizeMb}MB)，请先在模型管理中下载安装。")
+                    IOException("离线模型【${spec.name}】尚未下载 (${spec.sizeMb}MB)，请先在离线库中下载安装。")
                 )
             }
 
+            val threads = request.config.extraParams["numThreads"]?.toFloatOrNull()?.toInt()?.coerceIn(1, 4) ?: 2
+            val silenceScale = request.config.extraParams["silenceScale"]?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.2f
+
             runCatching {
                 ensureNativeLoaded()
-                val tts = getOrInitTts(spec)
+                val tts = getOrInitTts(spec, threads, silenceScale)
                 val sid = parseSpeakerId(request.config.voiceId)
                 val safeSpeed = request.config.speed.coerceIn(0.5f, 2.5f)
                 val generated = tts.generate(request.text, sid, safeSpeed)
@@ -93,11 +99,12 @@ private class SherpaOfflineProvider(
             }
         }
 
-    private fun getOrInitTts(spec: OfflineModelSpec): OfflineTts = synchronized(lock) {
-        if (currentTts != null && loadedModelId == spec.id) return currentTts!!
+    private fun getOrInitTts(spec: OfflineModelSpec, threads: Int, silenceScale: Float): OfflineTts = synchronized(lock) {
+        val key = "${spec.id}|$threads|$silenceScale"
+        if (currentTts != null && loadedConfigKey == key) return currentTts!!
         runCatching { currentTts?.release() }
         currentTts = null
-        loadedModelId = null
+        loadedConfigKey = null
 
         val dir = installer.getModelDir(spec.id)
         val allFiles = dir.walkTopDown().toList()
@@ -111,7 +118,7 @@ private class SherpaOfflineProvider(
             .firstOrNull { it.isDirectory && it.name.equals("espeak-ng-data", ignoreCase = true) }
             ?.absolutePath.orEmpty()
 
-        val modelCfg = buildModelConfig(spec, allFiles, onnx, tokens, lexicon, dictDir, espeakDir)
+        val modelCfg = buildModelConfig(spec, allFiles, onnx, tokens, lexicon, dictDir, espeakDir, threads)
         val fsts = allFiles.filter { it.extension.equals("fst", ignoreCase = true) }.joinToString(",") { it.absolutePath }
         val fars = allFiles.filter { it.extension.equals("far", ignoreCase = true) }.joinToString(",") { it.absolutePath }
         val ttsConfig = OfflineTtsConfig(
@@ -119,11 +126,11 @@ private class SherpaOfflineProvider(
             ruleFsts = fsts,
             ruleFars = fars,
             maxNumSentences = 1,
-            silenceScale = 0.2f
+            silenceScale = silenceScale
         )
         OfflineTts(null, ttsConfig).also {
             currentTts = it
-            loadedModelId = spec.id
+            loadedConfigKey = key
         }
     }
 
@@ -134,7 +141,8 @@ private class SherpaOfflineProvider(
         tokens: File,
         lexicon: String,
         dictDir: String,
-        espeakDir: String
+        espeakDir: String,
+        threads: Int
     ): OfflineTtsModelConfig = when (spec.arch) {
         ModelArch.VITS -> OfflineTtsModelConfig(
             vits = OfflineTtsVitsModelConfig(
@@ -144,7 +152,7 @@ private class SherpaOfflineProvider(
                 dataDir = espeakDir,
                 dictDir = dictDir
             ),
-            numThreads = 2,
+            numThreads = threads,
             provider = "cpu"
         )
         ModelArch.MATCHA -> {
@@ -159,7 +167,7 @@ private class SherpaOfflineProvider(
                     dataDir = espeakDir,
                     dictDir = dictDir
                 ),
-                numThreads = 2,
+                numThreads = threads,
                 provider = "cpu"
             )
         }
@@ -175,7 +183,7 @@ private class SherpaOfflineProvider(
                     lang = "",
                     dictDir = dictDir
                 ),
-                numThreads = 4,
+                numThreads = threads,
                 provider = "cpu"
             )
         }
@@ -192,7 +200,7 @@ private class SherpaOfflineProvider(
                     dataDir = espeakDir,
                     lexicon = lexicon
                 ),
-                numThreads = 4,
+                numThreads = threads,
                 provider = "cpu"
             )
         }

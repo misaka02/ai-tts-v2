@@ -66,12 +66,14 @@ class DoubaoTtsProvider(
                     put("cluster", cluster)
                 })
                 put("user", buildJsonObject { put("uid", "ai_tts_v2") })
+                val emotion = cfg.extraParams["emotion"]?.trim().orEmpty()
                 put("audio", buildJsonObject {
                     put("voice_type", cfg.voiceId.ifBlank { "zh_female_shuangkuaisisi_moon_bigtts" })
                     put("encoding", if (cfg.audioFormat.equals("wav", ignoreCase = true)) "wav" else "mp3")
                     put("speed_ratio", cfg.speed)
                     put("volume_ratio", 1.0)
                     put("pitch_ratio", cfg.pitch)
+                    if (emotion.isNotBlank()) put("emotion", emotion)
                 })
                 put("request", buildJsonObject {
                     put("reqid", UUID.randomUUID().toString())

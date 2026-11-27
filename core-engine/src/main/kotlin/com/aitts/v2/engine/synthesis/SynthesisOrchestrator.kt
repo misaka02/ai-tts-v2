@@ -16,7 +16,6 @@ import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.ProviderCredentials
 import com.aitts.v2.model.ReplacementRule
 import com.aitts.v2.model.SentenceSegment
-import com.aitts.v2.model.SpeechHistoryItem
 import com.aitts.v2.model.TtsProviderConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -48,13 +47,12 @@ data class SynthesisInput(
     val credentialsLookup: (String) -> ProviderCredentials,
     val systemSpeed: Float = 1.0f,
     val systemPitch: Float = 1.0f,
-    val fadeGainProvider: () -> Float = { 1.0f },
-    val onHistoryRecorded: (SpeechHistoryItem) -> Unit = {}
+    val fadeGainProvider: () -> Float = { 1.0f }
 )
 
 /**
  * Session-isolated synthesis orchestrator with sliding-window prefetch,
- * single-layer retry, safe pre-first-byte fallback, and unified audio pipeline.
+ * single-layer retry, safe pre-first-byte fallback, and lossless-first audio pipeline.
  */
 class SynthesisOrchestrator(
     private val registry: TtsProviderRegistry,
@@ -92,12 +90,11 @@ class SynthesisOrchestrator(
             }
 
             val baseCfg = SynthesisHelpers.resolveSpeedAndPitch(input.activeConfig, input)
-            logger.info("TTS_SVC", "开始合成 (${segments.size} 段)", "引擎=${baseCfg.name}", sessionId = sessionId)
+            val trace = "引擎=${baseCfg.name} 语速=${"%.2f".format(baseCfg.speed)}(sys=${"%.2f".format(input.systemSpeed)})"
+            logger.info("TTS_SVC", "开始合成 (${segments.size} 段)", trace, sessionId = sessionId)
 
             val prefetchCache = ConcurrentHashMap<Int, Deferred<Result<SynthesizedAudio>>>()
-            val windowSize = if (input.settings.enableSegmentPreload && segments.size > 1) {
-                input.settings.preloadAheadCount.coerceIn(1, 4)
-            } else 1
+            val windowSize = if (segments.size > 1) input.settings.preloadAheadCount.coerceIn(1, 3) else 1
             val activeCreds = input.credentialsLookup(baseCfg.id)
             val streamFirst = baseCfg.isStreamingEnabled && registry.get(baseCfg.type).capabilities.supportsNativePcmStreaming
 
@@ -110,24 +107,23 @@ class SynthesisOrchestrator(
                 val seg = segments[i]
                 sink.onSegmentStart(i, segments.size, seg.text)
 
-                if (input.settings.enableSegmentPreload) {
+                if (segments.size > 1) {
                     val aheadEnd = minOf(i + windowSize + 1, segments.size)
                     enqueuePrefetch(this, (i + 1) until aheadEnd, segments, baseCfg, activeCreds, input, sessionId, prefetchCache)
                 }
 
-                val segCfg = SynthesisHelpers.buildSegmentConfig(baseCfg, seg, input.settings)
                 val segCreds = SynthesisHelpers.rotateCredentials(activeCreds, i)
-                val gain = (segCfg.volume * input.fadeGainProvider()).coerceIn(0f, 2.5f)
-                val cap = registry.get(segCfg.type).capabilities
-                val useStream = segCfg.isStreamingEnabled && cap.supportsNativePcmStreaming && !prefetchCache.containsKey(i)
+                val gain = input.fadeGainProvider().coerceIn(0f, 1.0f)
+                val cap = registry.get(baseCfg.type).capabilities
+                val useStream = baseCfg.isStreamingEnabled && cap.supportsNativePcmStreaming && !prefetchCache.containsKey(i)
 
                 if (useStream) {
-                    streamOrFallback(seg, segCfg, segCreds, input, gain, sessionId, sink)
+                    streamOrFallback(seg, baseCfg, segCreds, input, gain, sessionId, sink)
                 } else {
                     val audio = (prefetchCache.remove(i) ?: async {
-                        fetchBatch(seg.text, segCfg, segCreds, input, sessionId)
+                        fetchBatch(seg.text, baseCfg, segCreds, input, sessionId)
                     }).await().getOrElse { throw it }
-                    pushBatch(audio, segCfg, input.settings, gain, targetRate, sink)
+                    pushBatch(audio, baseCfg, input.settings, gain, targetRate, sink)
                 }
 
                 if (input.settings.sentencePauseMs > 0 && i < segments.size - 1) {
@@ -157,12 +153,10 @@ class SynthesisOrchestrator(
         sessionId: String,
         sink: SynthesisSink
     ) {
-        val startMs = System.currentTimeMillis()
         val provider = registry.get(segCfg.type)
         if (input.settings.isAudioCacheEnabled) {
             diskCache.get(segCfg, seg.text)?.let { cached ->
                 pushBatch(SynthesizedAudio(cached, segCfg.sampleRate, isRawPcm = false), segCfg, input.settings, gain, 24000, sink)
-                SynthesisHelpers.recordHistory(input, "${segCfg.name} (缓存)", segCfg.voiceId, seg.text, startMs, fallback = false)
                 return
             }
         }
@@ -170,7 +164,9 @@ class SynthesisOrchestrator(
         val enhancer = AudioEnhancer()
         val scaler = if (segCfg.requiresClientSpeedScaling(isStreaming = true, capabilities = provider.capabilities)) {
             SonicSpeedScaler(24000, 1, segCfg.speed)
-        } else null
+        } else {
+            null
+        }
         var emitted = false
 
         val streamRes = provider.synthesizeStream(ProviderSynthesisRequest(seg.text, segCfg, segCreds, sessionId)) { chunk ->
@@ -178,7 +174,7 @@ class SynthesisOrchestrator(
             val resampled = PcmResampler.resample(chunk.pcm16Bytes, chunk.sampleRate, 1, 24000, 1)
             val scaled = scaler?.processChunk(resampled) ?: resampled
             if (scaled.isNotEmpty()) {
-                val processed = SynthesisHelpers.processChunkEnhancement(enhancer, scaled, input.settings, gain)
+                val processed = SynthesisHelpers.processChunkGain(enhancer, scaled, gain)
                 if (processed.isNotEmpty()) {
                     emitted = true
                     SynthesisHelpers.emitInChunks(processed, sink)
@@ -188,7 +184,7 @@ class SynthesisOrchestrator(
 
         if (streamRes.isSuccess) {
             scaler?.flush()?.takeIf { it.isNotEmpty() }?.let { tail ->
-                val processed = SynthesisHelpers.processChunkEnhancement(enhancer, tail, input.settings, gain)
+                val processed = SynthesisHelpers.processChunkGain(enhancer, tail, gain)
                 if (processed.isNotEmpty()) SynthesisHelpers.emitInChunks(processed, sink)
             }
             val rawFull = streamRes.getOrNull()?.bytes
@@ -196,7 +192,6 @@ class SynthesisOrchestrator(
                 val wav = WavCodec.encodeToWav(rawFull, streamRes.getOrNull()?.sampleRate ?: 24000, 1)
                 diskCache.put(segCfg, seg.text, wav, input.settings.maxCacheSizeMb)
             }
-            SynthesisHelpers.recordHistory(input, "${segCfg.name} (流式)", segCfg.voiceId, seg.text, startMs, fallback = false)
             return
         }
 
@@ -214,10 +209,8 @@ class SynthesisOrchestrator(
         input: SynthesisInput,
         sessionId: String
     ): Result<SynthesizedAudio> {
-        val startMs = System.currentTimeMillis()
         if (input.settings.isAudioCacheEnabled) {
             diskCache.get(cfg, text)?.let { cached ->
-                SynthesisHelpers.recordHistory(input, "${cfg.name} (缓存)", cfg.voiceId, text, startMs, fallback = false)
                 return Result.success(SynthesizedAudio(cached, cfg.sampleRate, isRawPcm = false))
             }
         }
@@ -235,7 +228,6 @@ class SynthesisOrchestrator(
                     val toCache = if (audio.isRawPcm) WavCodec.encodeToWav(audio.bytes, audio.sampleRate, 1) else audio.bytes
                     diskCache.put(cfg, text, toCache, input.settings.maxCacheSizeMb)
                 }
-                SynthesisHelpers.recordHistory(input, cfg.name, cfg.voiceId, text, startMs, fallback = false)
                 return Result.success(audio)
             }
             lastError = res.exceptionOrNull()
@@ -247,10 +239,7 @@ class SynthesisOrchestrator(
                 logger.warn("FALLBACK", "主引擎失败，降级至 ${fbCfg.name}", lastError?.message, sessionId = sessionId)
                 val fbCreds = input.credentialsLookup(fbCfg.id)
                 val fbRes = registry.get(fbCfg.type).synthesize(ProviderSynthesisRequest(text, fbCfg, fbCreds, sessionId))
-                if (fbRes.isSuccess) {
-                    SynthesisHelpers.recordHistory(input, "${fbCfg.name} (降级)", fbCfg.voiceId, text, startMs, fallback = true)
-                    return fbRes
-                }
+                if (fbRes.isSuccess) return fbRes
             }
         }
         return Result.failure(lastError ?: IOException("合成失败"))
@@ -283,9 +272,8 @@ class SynthesisOrchestrator(
         for (idx in indices) {
             if (idx !in segments.indices || cache.containsKey(idx)) continue
             val seg = segments[idx]
-            val segCfg = SynthesisHelpers.buildSegmentConfig(baseCfg, seg, input.settings)
             val segCreds = SynthesisHelpers.rotateCredentials(activeCreds, idx)
-            cache[idx] = scope.async { fetchBatch(seg.text, segCfg, segCreds, input, sessionId) }
+            cache[idx] = scope.async { fetchBatch(seg.text, baseCfg, segCreds, input, sessionId) }
         }
     }
 }

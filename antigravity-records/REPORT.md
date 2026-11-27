@@ -3,18 +3,18 @@
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
 - **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
-- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；最新预发布 [v2.1.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1)（Pre-release，含「纸墨听书」UI 重设计 & 功能全修复版 `ai-tts-v2-cloud-v2.1.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.1.0-pre.1.apk`）。
+- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；前序预发布 [v2.1.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1)；**最新预发布 [v2.1.0-pre.2](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.2)**（Pre-release，含精简重构、传统/AI引擎差异化、上游清单实时同步与极简字幕版 `ai-tts-v2-cloud-v2.1.0-pre.2.apk` 与 `ai-tts-v2-full-arm64-v2.1.0-pre.2.apk`）。
 - **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包 + 默认发布 GitHub Pre-release”规则。
-- **当前最新验证与产物（2026-11-27 纸墨重设计版）**：
+- **当前最新验证与产物（2026-11-27 v2.1.0-pre.2 精简与上游同步版）**：
   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）
-  - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 2m 1s`，`27/27` 单测通过，`Detekt` 0 issues，`Lint` 0 errors）
-  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **1,827,949 字节**（约 **1.74 MiB**，`apksigner` 校验通过）
-  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **25,502,031 字节**（约 **24.32 MiB**，`apksigner` 校验通过）
-  - **Qodo CLI 审查**：已对 `origin/main` 差异完成全量审查，修复 3 项有效缺陷（预览退出按钮复位、空闲波形动画停帧、深色模式状态对比度），独立核实 1 项为误报。
-- **代码体量总计**（不含 `build/`）：**92 个 `.kt` 文件，共 11,294 行**（另含 `Sonic.java`）
-  - `:core-model`：11 个文件，1,027 行
-  - `:core-engine`：37 个文件，4,017 行（另含 `Sonic.java`）
-  - `:app`：39 个文件，4,845 行
+  - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 1m 56s`，`34/34` 单测通过，`Detekt` 0 issues，`Lint` 0 errors）
+  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **1,828,249 字节**（约 **1.74 MiB**，`apksigner` 校验通过）
+  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **25,502,331 字节**（约 **24.32 MiB**，`apksigner` 校验通过）
+  - **Qodo CLI 审查（两轮闭环，严守最多 2 轮上限）**：第 1 轮识别并修复 6 项新增安全/功能细节（离线模型 ID 路径穿越防御、`model_spec.json` 动态元信息持久化、`DiscoveryDiskCache` 按凭据指纹隔离、外部分享 `CharSequence` 兼容与缓冲队列自动跳转听书台）；第 2 轮确认第 1 轮全数 `resolved`，并补齐第 2 轮提出的远程清单域名白名单、硅基流动兼容模板保留、脱清单已装离线模型展示、下载/解压安全上限与引擎切换字段复位。
+- **最新代码体量总计**（不含 `build/`）：**90 个 `.kt` 文件，共 11,785 行**（另含 `Sonic.java`）
+  - `:core-model`：12 个文件，1,122 行
+  - `:core-engine`：33 个文件，4,122 行（另含 `Sonic.java`）
+  - `:app`（`main` + `cloud` + `full`）：45 个文件，6,541 行
 
 ## 2. 架构与核心改进对照
 

@@ -22,7 +22,6 @@ import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,10 +47,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.model.ProviderCredentials
+import com.aitts.v2.model.ProviderDescriptorRegistry
 import com.aitts.v2.model.ProviderType
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.ui.theme.InkPaperCard
 import com.aitts.v2.ui.theme.InkSectionHeader
+import com.aitts.v2.ui.theme.InkStatusPill
+import com.aitts.v2.ui.theme.PillTone
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -74,54 +76,40 @@ fun ProviderEditScreen(
     var secondaryKey by remember { mutableStateOf(existingCreds.secondaryApiKey) }
     var modelName by remember { mutableStateOf(initial.modelName) }
     var voiceId by remember { mutableStateOf(initial.voiceId) }
-    var dialogueVoiceId by remember { mutableStateOf(initial.dialogueVoiceId) }
-    var maleVoiceId by remember { mutableStateOf(initial.maleVoiceId) }
-    var femaleVoiceId by remember { mutableStateOf(initial.femaleVoiceId) }
-    var elderVoiceId by remember { mutableStateOf(initial.elderVoiceId) }
-    var dualRole by remember { mutableStateOf(initial.isDualRoleEnabled) }
     var speed by remember { mutableFloatStateOf(initial.speed) }
     var pitch by remember { mutableFloatStateOf(initial.pitch) }
     var sampleRate by remember { mutableStateOf(initial.sampleRate.toString()) }
     var audioFormat by remember { mutableStateOf(initial.audioFormat) }
     var streaming by remember { mutableStateOf(initial.isStreamingEnabled) }
     var prompt by remember { mutableStateOf(initial.promptInstruction) }
-    var doubaoAppId by remember { mutableStateOf(initial.extraParams["appId"].orEmpty()) }
-    var doubaoCluster by remember { mutableStateOf(initial.extraParams["cluster"] ?: "volcano_tts") }
+    var customHeaders by remember { mutableStateOf(initial.customHeadersJson) }
     var customPayload by remember { mutableStateOf(initial.customPayloadTemplate) }
     var responsePath by remember { mutableStateOf(initial.responseAudioPath) }
+    var extraParams by remember { mutableStateOf(initial.extraParams) }
     var showOfflineSheet by remember { mutableStateOf(false) }
 
-    fun buildDraft(): TtsProviderConfig {
-        val extras = if (type == ProviderType.DOUBAO) {
-            mapOf("appId" to doubaoAppId.trim(), "cluster" to doubaoCluster.trim().ifBlank { "volcano_tts" })
-        } else {
-            initial.extraParams
-        }
-        return initial.copy(
-            type = type,
-            name = name.trim().ifBlank { type.displayName },
-            baseUrl = baseUrl.trim(),
-            modelName = modelName.trim(),
-            voiceId = voiceId.trim(),
-            dialogueVoiceId = dialogueVoiceId.trim(),
-            maleVoiceId = maleVoiceId.trim(),
-            femaleVoiceId = femaleVoiceId.trim(),
-            elderVoiceId = elderVoiceId.trim(),
-            isDualRoleEnabled = dualRole,
-            speed = speed,
-            pitch = pitch,
-            sampleRate = sampleRate.toIntOrNull() ?: 24000,
-            audioFormat = audioFormat.trim().ifBlank { "mp3" },
-            isStreamingEnabled = streaming,
-            promptInstruction = prompt.trim(),
-            customPayloadTemplate = customPayload,
-            responseAudioPath = responsePath.trim(),
-            extraParams = extras
-        )
-    }
+    val descriptor = remember(type) { ProviderDescriptorRegistry.descriptorFor(type) }
+
+    fun buildDraft(): TtsProviderConfig = initial.copy(
+        type = type,
+        name = name.trim().ifBlank { type.displayName },
+        baseUrl = baseUrl.trim(),
+        modelName = modelName.trim(),
+        voiceId = voiceId.trim(),
+        speed = speed,
+        pitch = pitch,
+        sampleRate = sampleRate.toIntOrNull() ?: 24000,
+        audioFormat = audioFormat.trim().ifBlank { "mp3" },
+        isStreamingEnabled = streaming && descriptor.supportsStreaming,
+        promptInstruction = prompt.trim(),
+        customHeadersJson = customHeaders.ifBlank { "{}" },
+        customPayloadTemplate = customPayload,
+        responseAudioPath = responsePath.trim(),
+        extraParams = extraParams
+    )
 
     LaunchedEffect(type) {
-        viewModel.loadVoicesAndModels(buildDraft(), ProviderCredentials(apiKey, secondaryKey))
+        viewModel.loadVoicesAndModels(buildDraft(), ProviderCredentials(apiKey, secondaryKey), forceRefresh = false)
     }
 
     LaunchedEffect(uiState.message) {
@@ -131,20 +119,16 @@ fun ProviderEditScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { viewModel.stopPreview() }
-    }
+    DisposableEffect(Unit) { onDispose { viewModel.stopPreview() } }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-                title = { Text("节点配置 · ${type.displayName}", style = MaterialTheme.typography.titleMedium) },
+                title = { Text("配置 · ${type.displayName}", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回") }
                 },
                 actions = {
                     IconButton(onClick = {
@@ -164,8 +148,12 @@ fun ProviderEditScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            InkSectionHeader("协议与身份")
+            InkSectionHeader("协议与范式")
             InkPaperCard(padding = 14.dp) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    InkStatusPill(descriptor.category.displayName, PillTone.ACCENT)
+                    Text(descriptor.summary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ProviderType.entries.forEach { candidate ->
                         FilterChip(
@@ -178,35 +166,33 @@ fun ProviderEditScreen(
                                 voiceId = preset.voiceId
                                 sampleRate = preset.sampleRate.toString()
                                 audioFormat = preset.audioFormat
+                                streaming = preset.isStreamingEnabled
+                                prompt = preset.promptInstruction
+                                customHeaders = preset.customHeadersJson
+                                customPayload = preset.customPayloadTemplate
+                                responsePath = preset.responseAudioPath
+                                extraParams = preset.extraParams
                             },
                             label = { Text(candidate.displayName) }
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("节点名称") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("节点名称") }, modifier = Modifier.fillMaxWidth())
             }
 
             InkSectionHeader("接口与密钥")
             CredentialsEndpointSection(
                 type = type,
+                descriptor = descriptor,
                 baseUrl = baseUrl,
                 onBaseUrlChange = { baseUrl = it },
                 apiKey = apiKey,
                 onApiKeyChange = { apiKey = it },
                 secondaryKey = secondaryKey,
-                onSecondaryKeyChange = { secondaryKey = it },
-                doubaoAppId = doubaoAppId,
-                onDoubaoAppIdChange = { doubaoAppId = it },
-                doubaoCluster = doubaoCluster,
-                onDoubaoClusterChange = { doubaoCluster = it }
+                onSecondaryKeyChange = { secondaryKey = it }
             )
 
-            InkSectionHeader("模型与音色")
+            InkSectionHeader("上游实时音色与模型")
             ModelVoiceDiscoverySection(
                 type = type,
                 modelName = modelName,
@@ -216,17 +202,20 @@ fun ProviderEditScreen(
                 availableModels = uiState.availableModels,
                 availableVoices = uiState.availableVoices,
                 downloadedModelIds = uiState.downloadedModelIds,
+                fromRemote = uiState.discoveryFromRemote,
                 isLoading = uiState.isLoadingVoices,
-                onRefresh = { viewModel.loadVoicesAndModels(buildDraft(), ProviderCredentials(apiKey, secondaryKey)) },
+                onRefresh = { viewModel.loadVoicesAndModels(buildDraft(), ProviderCredentials(apiKey, secondaryKey), forceRefresh = true) },
                 onOpenOfflineCatalog = { showOfflineSheet = true }
             )
 
-            InkSectionHeader("声学与对白分角")
+            InkSectionHeader("声学调节与厂商参数")
             InkPaperCard(padding = 14.dp) {
                 Text("语速 ${"%.2f".format(speed)}×", style = MaterialTheme.typography.labelMedium)
                 Slider(value = speed, onValueChange = { speed = it }, valueRange = 0.4f..2.5f)
-                Text("音调 ${"%.2f".format(pitch)}", style = MaterialTheme.typography.labelMedium)
-                Slider(value = pitch, onValueChange = { pitch = it }, valueRange = 0.5f..2.0f)
+                if (descriptor.supportsPitch) {
+                    Text("音调 ${"%.2f".format(pitch)}", style = MaterialTheme.typography.labelMedium)
+                    Slider(value = pitch, onValueChange = { pitch = it }, valueRange = 0.5f..2.0f)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = sampleRate,
@@ -237,55 +226,51 @@ fun ProviderEditScreen(
                     OutlinedTextField(
                         value = audioFormat,
                         onValueChange = { audioFormat = it },
-                        label = { Text("音频格式 (mp3/wav)") },
+                        label = { Text("格式(mp3/wav)") },
                         modifier = Modifier.weight(1f)
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("启用流式低延迟推流", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = streaming, onCheckedChange = { streaming = it })
+                if (descriptor.supportsStreaming) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("启用原生低延迟流式推流", style = MaterialTheme.typography.bodyMedium)
+                        Switch(checked = streaming, onCheckedChange = { streaming = it })
+                    }
                 }
-                if (type == ProviderType.MIMO || type == ProviderType.GEMINI) {
+                if (descriptor.supportsDirectorPrompt) {
                     OutlinedTextField(
                         value = prompt,
                         onValueChange = { prompt = it },
-                        label = { Text("导演指令 / Prompt") },
+                        label = { Text("原生指令 / instructions / Prompt") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                DualRoleSection(
-                    dualRole = dualRole,
-                    onDualRoleChange = { dualRole = it },
-                    dialogueVoiceId = dialogueVoiceId,
-                    onDialogueChange = { dialogueVoiceId = it },
-                    maleVoiceId = maleVoiceId,
-                    onMaleChange = { maleVoiceId = it },
-                    femaleVoiceId = femaleVoiceId,
-                    onFemaleChange = { femaleVoiceId = it },
-                    elderVoiceId = elderVoiceId,
-                    onElderChange = { elderVoiceId = it }
+                VendorParamsSection(
+                    specs = descriptor.extraParams,
+                    extraParams = extraParams,
+                    dynamicVoiceStyles = uiState.stylesByVoice[voiceId].orEmpty(),
+                    onParamChange = { k, v -> extraParams = extraParams + (k to v) }
                 )
             }
 
             if (type == ProviderType.CUSTOM_HTTP) {
                 CustomHttpSection(
+                    customHeaders = customHeaders,
+                    onHeadersChange = { customHeaders = it },
                     customPayload = customPayload,
                     onPayloadChange = { customPayload = it },
                     responsePath = responsePath,
-                    onResponsePathChange = { responsePath = it }
+                    onResponsePathChange = { responsePath = it },
+                    onApplyPreset = { u, h, p, r -> baseUrl = u; customHeaders = h; customPayload = p; responsePath = r }
                 )
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
-                    onClick = {
-                        viewModel.testAndPreview(buildDraft(), ProviderCredentials(apiKey.trim(), secondaryKey.trim()))
-                    },
+                    onClick = { viewModel.testAndPreview(buildDraft(), ProviderCredentials(apiKey.trim(), secondaryKey.trim())) },
                     enabled = !uiState.isTestingSingle,
                     modifier = Modifier.weight(1f)
                 ) {

@@ -3,18 +3,6 @@ package com.aitts.v2.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class SpeechHistoryItem(
-    val id: String,
-    val text: String,
-    val providerName: String,
-    val voiceId: String,
-    val costMs: Long,
-    val characterCount: Int,
-    val timestamp: Long = System.currentTimeMillis(),
-    val isFallbackUsed: Boolean = false
-)
-
-@Serializable
 enum class LogLevel(val badge: String) {
     INFO("INFO"),
     SUCCESS("OK"),
@@ -77,9 +65,19 @@ data class OfflineModelSpec(
 
 @Serializable
 data class BackupPayload(
-    val version: Int = 2,
+    val version: Int = 3,
     val settings: GlobalSettings,
     val providers: List<TtsProviderConfig>,
     val rules: List<ReplacementRule>,
     val credentials: Map<String, ProviderCredentials> = emptyMap()
+)
+
+@Serializable
+data class UpstreamManifest(
+    val version: Int = 1,
+    val updatedAt: String = "2026-11-27",
+    val edgeGecVersion: String = "1-143.0.3650.75",
+    val defaultEndpoints: Map<String, String> = emptyMap(),
+    val offlineModels: List<OfflineModelSpec> = emptyList(),
+    val presetVoices: Map<String, List<VoiceModel>> = emptyMap()
 )

@@ -12,7 +12,6 @@ import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.PresetCatalog
 import com.aitts.v2.model.ProviderCredentials
 import com.aitts.v2.model.ReplacementRule
-import com.aitts.v2.model.SpeechHistoryItem
 import com.aitts.v2.model.TtsProviderConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +29,7 @@ import java.util.UUID
 private val Context.appDataStore: DataStore<Preferences> by preferencesDataStore(name = "aitts_v2_prefs")
 
 /**
- * Real Jetpack DataStore repository managing settings, providers, rules, and speech history.
+ * Clean Jetpack DataStore repository managing settings, providers, and rules (zero history disk thrashing).
  */
 class AppPreferencesRepository(
     private val context: Context,
@@ -48,9 +47,6 @@ class AppPreferencesRepository(
 
     private val _rulesFlow = MutableStateFlow(PresetCatalog.defaultRules)
     val rulesFlow: StateFlow<List<ReplacementRule>> = _rulesFlow.asStateFlow()
-
-    private val _historyFlow = MutableStateFlow<List<SpeechHistoryItem>>(emptyList())
-    val historyFlow: StateFlow<List<SpeechHistoryItem>> = _historyFlow.asStateFlow()
 
     init {
         runBlocking {
@@ -70,10 +66,6 @@ class AppPreferencesRepository(
                 runCatching { json.decodeFromString<List<ReplacementRule>>(str) }.getOrNull()
                     ?.let { _rulesFlow.value = it }
             }
-            prefs[KEY_HISTORY]?.let { str ->
-                runCatching { json.decodeFromString<List<SpeechHistoryItem>>(str) }.getOrNull()
-                    ?.let { _historyFlow.value = it }
-            }
         }
     }
 
@@ -87,9 +79,8 @@ class AppPreferencesRepository(
 
     fun getCredentials(providerId: String): ProviderCredentials = secretStore.getCredentials(providerId)
 
-    fun saveCredentials(providerId: String, credentials: ProviderCredentials) {
+    fun saveCredentials(providerId: String, credentials: ProviderCredentials): Boolean =
         secretStore.saveCredentials(providerId, credentials)
-    }
 
     fun updateSettings(settings: GlobalSettings) {
         _settingsFlow.value = settings
@@ -184,17 +175,6 @@ class AppPreferencesRepository(
         saveRules(_rulesFlow.value.filterNot { it.id == id })
     }
 
-    fun recordSpeechHistory(item: SpeechHistoryItem) {
-        val updated = (listOf(item) + _historyFlow.value).take(50)
-        _historyFlow.value = updated
-        persist(KEY_HISTORY, json.encodeToString(updated))
-    }
-
-    fun clearHistory() {
-        _historyFlow.value = emptyList()
-        scope.launch { context.appDataStore.edit { it.remove(KEY_HISTORY) } }
-    }
-
     fun resetToDefaults() {
         updateSettings(GlobalSettings())
         saveProviders(PresetCatalog.createDefaultProviders())
@@ -211,6 +191,5 @@ class AppPreferencesRepository(
         private val KEY_SETTINGS = stringPreferencesKey("global_settings")
         private val KEY_PROVIDERS = stringPreferencesKey("tts_providers")
         private val KEY_RULES = stringPreferencesKey("replacement_rules")
-        private val KEY_HISTORY = stringPreferencesKey("speech_history")
     }
 }

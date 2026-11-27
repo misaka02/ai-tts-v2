@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bedtime
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,14 +49,12 @@ fun SpeechHubScreen(
     val providers by viewModel.providersFlow.collectAsStateWithLifecycle()
     val activeProvider by viewModel.activeProviderFlow.collectAsStateWithLifecycle()
     val rms by viewModel.rmsFlow.collectAsStateWithLifecycle()
-    val history by viewModel.historyFlow.collectAsStateWithLifecycle()
     val sleepActive by viewModel.sleepActiveFlow.collectAsStateWithLifecycle()
     val sleepSec by viewModel.sleepRemainingFlow.collectAsStateWithLifecycle()
     val logSessions by viewModel.logSessionsFlow.collectAsStateWithLifecycle()
     val rawLogs by viewModel.rawLogsFlow.collectAsStateWithLifecycle()
 
     var showLogs by remember { mutableStateOf(false) }
-    var showHistory by remember { mutableStateOf(false) }
     var showSleepDialog by remember { mutableStateOf(false) }
     var showQuickPicker by remember { mutableStateOf(false) }
     var showTuner by remember { mutableStateOf(false) }
@@ -83,7 +80,6 @@ fun SpeechHubScreen(
                 sleepSec = sleepSec,
                 onOpenTtsSettings = { PermissionHelper.openSystemTtsSettings(context) },
                 onOpenSleep = { showSleepDialog = true },
-                onOpenHistory = { showHistory = true },
                 onOpenLogs = { showLogs = true }
             )
         }
@@ -145,14 +141,6 @@ fun SpeechHubScreen(
             onDismiss = { showSleepDialog = false }
         )
     }
-    if (showHistory) {
-        HistorySheet(
-            history = history,
-            onSelect = { viewModel.loadHistoryItem(it); showHistory = false },
-            onClear = viewModel::clearHistory,
-            onDismiss = { showHistory = false }
-        )
-    }
     if (showLogs) {
         LogViewerSheet(sessions = logSessions, rawLogs = rawLogs, onClear = viewModel::clearLogs, onDismiss = { showLogs = false })
     }
@@ -187,7 +175,6 @@ private fun HubMasthead(
     sleepSec: Int,
     onOpenTtsSettings: () -> Unit,
     onOpenSleep: () -> Unit,
-    onOpenHistory: () -> Unit,
     onOpenLogs: () -> Unit
 ) {
     Row(
@@ -216,9 +203,6 @@ private fun HubMasthead(
                     contentDescription = "睡眠定时",
                     tint = if (sleepActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-            IconButton(onClick = onOpenHistory) {
-                Icon(Icons.Outlined.History, contentDescription = "历史", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onOpenLogs) {
                 Icon(Icons.Outlined.Terminal, contentDescription = "日志", tint = MaterialTheme.colorScheme.onSurfaceVariant)

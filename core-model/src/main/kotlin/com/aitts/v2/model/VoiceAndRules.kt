@@ -8,7 +8,8 @@ data class VoiceModel(
     val name: String,
     val gender: String = "Female",
     val locale: String = "zh-CN",
-    val description: String = ""
+    val description: String = "",
+    val styles: List<String> = emptyList()
 )
 
 @Serializable

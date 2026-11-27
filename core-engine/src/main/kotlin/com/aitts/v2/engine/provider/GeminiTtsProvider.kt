@@ -58,26 +58,46 @@ class GeminiTtsProvider(
     override suspend fun fetchModels(
         config: TtsProviderConfig,
         credentials: ProviderCredentials
-    ): List<String> = withContext(Dispatchers.IO) {
+    ): List<String> = fetchModelsInternal(config, credentials).first
+
+    override suspend fun discoverCatalog(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): DiscoveryCatalog {
+        val (models, fromRemote) = fetchModelsInternal(config, credentials)
+        return DiscoveryCatalog(
+            models = models,
+            voices = PresetVoices.geminiVoices,
+            resolvedEndpoint = normalizeBaseRoot(config.baseUrl),
+            fromRemote = fromRemote
+        )
+    }
+
+    private suspend fun fetchModelsInternal(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): Pair<List<String>, Boolean> = withContext(Dispatchers.IO) {
         val fallback = listOf("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts")
         val apiKey = credentials.apiKey.trim()
-        if (apiKey.isBlank()) return@withContext fallback
+        if (apiKey.isBlank()) return@withContext fallback to false
         val rootBase = normalizeBaseRoot(config.baseUrl)
         val req = Request.Builder()
             .url("$rootBase/models")
             .addHeader("x-goog-api-key", apiKey)
             .build()
-        runCatching {
+        var fromRemote = false
+        val fetched = runCatching {
             HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
-                if (!resp.isSuccessful) return@executeTracked fallback
+                if (!resp.isSuccessful) return@executeTracked emptyList()
                 val root = HttpCallSupport.json.decodeFromString<JsonObject>(resp.body?.string().orEmpty())
                 root["models"]?.jsonArray
                     ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.content?.removePrefix("models/") }
                     ?.filter { it.contains("tts", ignoreCase = true) || it.contains("2.5-flash", ignoreCase = true) }
-                    ?.ifEmpty { fallback }
-                    ?: fallback
+                    ?.also { if (it.isNotEmpty()) fromRemote = true }
+                    .orEmpty()
             }
-        }.getOrDefault(fallback)
+        }.getOrDefault(emptyList())
+        fetched.ifEmpty { fallback } to fromRemote
     }
 
     override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> =

@@ -125,8 +125,7 @@ class AiTextToSpeechService : TextToSpeechService() {
             credentialsLookup = { id -> container.preferences.getCredentials(id) },
             systemSpeed = mapReaderScale(request.speechRate, 0.25f, 3.0f),
             systemPitch = mapReaderScale(request.pitch, 0.5f, 2.0f),
-            fadeGainProvider = { container.sleepTimer.getFadeVolumeFactor() },
-            onHistoryRecorded = { item -> container.preferences.recordSpeechHistory(item) }
+            fadeGainProvider = { container.sleepTimer.getFadeVolumeFactor() }
         )
 
         val sink = object : SynthesisSink {

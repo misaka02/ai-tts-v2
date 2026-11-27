@@ -1,11 +1,8 @@
 package com.aitts.v2.engine.text
 
-import com.aitts.v2.model.EmotionType
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.PresetCatalog
 import com.aitts.v2.model.ReplacementRule
-import com.aitts.v2.model.SegmentRole
-import com.aitts.v2.model.SegmentationMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,41 +29,30 @@ class TextPipelineTest {
     }
 
     @Test
-    fun `user watermark rules execute before url cleanup and dialogue segmentation keeps quotes`() {
-        val raw = "少女哽咽道：「你真的要走吗？」（本章完） https://pirate.example.com/123"
-        val settings = GlobalSettings(
-            isSentenceSplittingEnabled = true,
-            textSegmentationMode = SegmentationMode.SMART_HYBRID,
-            isAcronymNormalizationEnabled = false
-        )
+    fun `watermark rules execute cleanly and segmentation preserves intact opening sentences`() {
+        val raw = "少女哽咽道：「你真的要走吗？」后续还有一大段自然描写文字。（本章完） https://pirate.example.com/123"
+        val settings = GlobalSettings(isSmartSegmentationEnabled = true, isNumberNormalizationEnabled = false)
         val segments = TextPipeline.process(raw, PresetCatalog.defaultRules, settings)
 
         val joined = segments.joinToString("") { it.text }
         assertFalse(joined.contains("pirate"))
         assertFalse(joined.contains("本章完"))
-        assertFalse(joined.contains("网址链接"))
-
-        val dlgSeg = segments.firstOrNull { it.role == SegmentRole.FEMALE_DIALOGUE }
-        assertEquals(EmotionType.SAD, dlgSeg?.emotion)
-        assertTrue(dlgSeg?.text?.contains("你真的要走吗") == true)
+        assertEquals(1, segments.size)
+        assertTrue(segments.single().text.contains("你真的要走吗"))
     }
 
     @Test
-    fun `acronym normalizer respects disabled flag`() {
-        val raw = "AI 与 WiFi 技术"
-        val off = TextPipeline.process(
-            raw,
-            emptyList(),
-            GlobalSettings(isSentenceSplittingEnabled = false, isAcronymNormalizationEnabled = false)
-        )
-        assertEquals("AI 与 WiFi 技术", off.single().text)
+    fun `number normalization defaults to false for neural TTS and works when enabled`() {
+        val raw = "2026年 AI 与 WiFi 报告"
+        val off = TextPipeline.process(raw, emptyList(), GlobalSettings(isSmartSegmentationEnabled = false))
+        assertEquals("2026年 AI 与 WiFi 报告", off.single().text)
 
         val on = TextPipeline.process(
             raw,
             emptyList(),
-            GlobalSettings(isSentenceSplittingEnabled = false, isAcronymNormalizationEnabled = true)
+            GlobalSettings(isSmartSegmentationEnabled = false, isNumberNormalizationEnabled = true)
         )
-        assertEquals("A-I 与 W-i-F-i 技术", on.single().text)
+        assertEquals("二零二六年 AI 与 WiFi 报告", on.single().text)
     }
 
     @Test
@@ -78,7 +64,7 @@ class TextPipelineTest {
         val segs = TextPipeline.process(
             "foo 42",
             rules,
-            GlobalSettings(isSentenceSplittingEnabled = false, isNumberNormalizationEnabled = false)
+            GlobalSettings(isSmartSegmentationEnabled = false, isNumberNormalizationEnabled = false)
         )
         assertEquals("bar 数字", segs.single().text)
     }

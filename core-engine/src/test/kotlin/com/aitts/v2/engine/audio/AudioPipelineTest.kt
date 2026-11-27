@@ -1,9 +1,8 @@
 package com.aitts.v2.engine.audio
 
 import com.aitts.v2.engine.cache.AudioDiskCache
-import com.aitts.v2.model.AudioProcessingMode
-import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.model.ProviderType
+import com.aitts.v2.model.TtsProviderConfig
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -11,8 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 class AudioPipelineTest {
 
@@ -39,7 +36,7 @@ class AudioPipelineTest {
     }
 
     @Test
-    fun `wav codec parses PCM16 and IEEE Float32 cleanly`() {
+    fun `wav codec parses PCM16 and encodes cleanly`() {
         val pcm16 = byteArrayOf(0x00, 0x10, 0x00, 0x20, 0x00, 0x30, 0x00, 0x40)
         val wav = WavCodec.encodeToWav(pcm16, sampleRate = 24000, channels = 1)
         val parsed = WavCodec.parseWav(wav)
@@ -50,11 +47,15 @@ class AudioPipelineTest {
     }
 
     @Test
-    fun `audio enhancer passthrough is bit-exact`() {
+    fun `audio enhancer passthrough is bit-exact and applies linear gain fade cleanly`() {
         val pcm = ByteArray(400) { (it % 127).toByte() }
         val enhancer = AudioEnhancer()
-        val out = enhancer.processPcm(pcm, channels = 1, mode = AudioProcessingMode.PASSTHROUGH, trimSilence = false)
+        val out = enhancer.processPcm(pcm, channels = 1, gain = 1.0f, trimSilence = false)
         assertArrayEquals(pcm, out)
+
+        val faded = enhancer.processPcm(byteArrayOf(0x00, 0x20), channels = 1, gain = 0.5f, trimSilence = false)
+        assertEquals(0x00.toByte(), faded[0])
+        assertEquals(0x10.toByte(), faded[1])
     }
 
     @Test
@@ -76,7 +77,7 @@ class AudioPipelineTest {
     fun `audio disk cache enforces maxCacheSizeMb`() {
         val cache = AudioDiskCache(tempFolder.newFolder("cache"))
         val cfg = TtsProviderConfig(id = "edge", type = ProviderType.EDGE_TTS, name = "Edge")
-        val payload = ByteArray(600 * 1024) { 1 } // 0.6 MB each
+        val payload = ByteArray(600 * 1024) { 1 }
         for (i in 0..9) {
             cache.put(cfg, "sentence_$i", payload, maxCacheSizeMb = 1)
         }

@@ -12,7 +12,6 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
@@ -20,16 +19,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.SubtitleAlignment
-import com.aitts.v2.model.SubtitleNovelPreset
 
 /**
- * Lightweight foreground novel subtitle overlay.
- * Adapts to system dark/light mode or user-selected paper presets with contrast outline.
+ * Minimalist foreground novel subtitle overlay.
+ * Automatically adapts to system dark/light theme with drag-position memory, tap-to-expand, and lock mode.
  */
 class FloatingSubtitleOverlay(
     private val appContext: Context,
     private val settingsProvider: () -> GlobalSettings,
-    private val onPresetSelected: (SubtitleNovelPreset) -> Unit,
     private val onClosedByUser: () -> Unit = {},
     private val onPositionChanged: (Int) -> Unit = {}
 ) {
@@ -37,16 +34,12 @@ class FloatingSubtitleOverlay(
     private val handler = Handler(Looper.getMainLooper())
 
     private var containerView: LinearLayout? = null
-    private var iconView: ImageView? = null
-    private var paletteBtn: ImageView? = null
-    private var paletteBar: LinearLayout? = null
     private var textView: TextView? = null
     private var closeBtn: ImageView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private var attached = false
     private var expanded = false
-    private var tempInverted = false
     private var lastText = ""
 
     fun isShowing(): Boolean = attached
@@ -79,67 +72,47 @@ class FloatingSubtitleOverlay(
             val alpha = (settings.floatingSubtitleOpacity.coerceIn(0f, 1f) * 255).toInt()
             val isSysDark = (appContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
                 Configuration.UI_MODE_NIGHT_YES
-            val effectiveDark = when (settings.floatingSubtitleNovelPreset) {
-                SubtitleNovelPreset.AUTO -> if (tempInverted) !isSysDark else isSysDark
-                SubtitleNovelPreset.NIGHT -> !tempInverted
-                else -> tempInverted
-            }
-
-            val (bgBase, fgColor) = when (settings.floatingSubtitleNovelPreset) {
-                SubtitleNovelPreset.AUTO ->
-                    if (effectiveDark) Color.parseColor("#181A20") to Color.parseColor("#F5F5F7")
-                    else Color.WHITE to Color.parseColor("#0F172A")
-                else -> {
-                    val presetBg = settings.floatingSubtitleNovelPreset.bgHex.toInt()
-                    val presetFg = settings.floatingSubtitleNovelPreset.textHex.toInt()
-                    if (tempInverted) Color.parseColor("#181A20") to Color.parseColor("#F5F5F7") else presetBg to presetFg
-                }
-            }
+            val bgBase = if (isSysDark) Color.parseColor("#181614") else Color.parseColor("#FDFBF7")
+            val fgColor = if (isSysDark) Color.parseColor("#EFEAE0") else Color.parseColor("#1B1917")
 
             if (alpha <= 5) {
                 container.background = null
                 container.elevation = 0f
             } else {
                 val bgColor = Color.argb(alpha, Color.red(bgBase), Color.green(bgBase), Color.blue(bgBase))
-                val stroke = if (effectiveDark) Color.argb((alpha * 0.3f).toInt(), 255, 255, 255)
-                else Color.argb((alpha * 0.25f).toInt(), 15, 23, 42)
+                val stroke = if (isSysDark) {
+                    Color.argb((alpha * 0.30f).toInt(), 239, 234, 224)
+                } else {
+                    Color.argb((alpha * 0.25f).toInt(), 27, 25, 23)
+                }
                 container.background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(16f).toFloat()
+                    cornerRadius = dp(14f).toFloat()
                     setColor(bgColor)
                     setStroke(dp(1f), stroke)
                 }
-                container.elevation = dp(6f).toFloat()
+                container.elevation = dp(4f).toFloat()
             }
 
             textView?.apply {
                 setTextColor(fgColor)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, settings.floatingSubtitleFontSize.coerceIn(11, 28).toFloat())
-                gravity = if (settings.floatingSubtitleAlignment == SubtitleAlignment.CENTER) Gravity.CENTER
-                else Gravity.START or Gravity.CENTER_VERTICAL
-                maxLines = if (expanded) 14 else settings.floatingSubtitleMaxLines.coerceIn(1, 8)
-                val lum = (0.299 * Color.red(fgColor) + 0.587 * Color.green(fgColor) + 0.114 * Color.blue(fgColor)) / 255.0
-                if (alpha <= 5 || settings.floatingSubtitleAdaptiveContrast) {
-                    val shadowColor = if (lum > 0.5) Color.parseColor("#CC000000") else Color.parseColor("#99FFFFFF")
-                    setShadowLayer(dp(3f).toFloat(), 0f, dp(1f).toFloat(), shadowColor)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, settings.floatingSubtitleFontSize.coerceIn(11, 26).toFloat())
+                gravity = if (settings.floatingSubtitleAlignment == SubtitleAlignment.CENTER) {
+                    Gravity.CENTER
                 } else {
-                    setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+                    Gravity.START or Gravity.CENTER_VERTICAL
                 }
+                maxLines = if (expanded) 12 else 3
+                val shadowColor = if (isSysDark) Color.parseColor("#CC000000") else Color.parseColor("#99FFFFFF")
+                setShadowLayer(dp(2.5f).toFloat(), 0f, dp(1f).toFloat(), shadowColor)
             }
-
-            iconView?.visibility = if (settings.floatingSubtitleShowIcon) View.VISIBLE else View.GONE
-            iconView?.setColorFilter(fgColor)
-            paletteBtn?.setColorFilter(fgColor)
-            closeBtn?.setColorFilter(if (effectiveDark) Color.parseColor("#B0B5C5") else Color.parseColor("#475569"))
+            closeBtn?.setColorFilter(if (isSysDark) Color.parseColor("#9C9387") else Color.parseColor("#675F55"))
         }
     }
 
     fun destroy() {
         hide()
         containerView = null
-        iconView = null
-        paletteBtn = null
-        paletteBar = null
         textView = null
         closeBtn = null
         layoutParams = null
@@ -151,7 +124,7 @@ class FloatingSubtitleOverlay(
             return
         }
         val metrics = appContext.resources.displayMetrics
-        val width = minOf((metrics.widthPixels * 0.94f).toInt(), metrics.widthPixels - dp(20f))
+        val width = minOf((metrics.widthPixels * 0.92f).toInt(), metrics.widthPixels - dp(24f))
         val defaultY = (metrics.heightPixels - dp(180f)).coerceAtLeast(dp(60f))
         val initialY = if (settings.floatingSubtitleY >= 0) {
             settings.floatingSubtitleY.coerceIn(dp(20f), (metrics.heightPixels - dp(60f)).coerceAtLeast(dp(60f)))
@@ -171,62 +144,15 @@ class FloatingSubtitleOverlay(
         }
 
         val container = LinearLayout(appContext).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10f), dp(8f), dp(8f), dp(8f))
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14f), dp(10f), dp(8f), dp(10f))
         }
         containerView = container
 
-        val (mainRow, tv) = buildMainRow(container)
-        val pRow = buildPaletteRow()
-        paletteBar = pRow
-        paletteBtn?.setOnClickListener {
-            pRow.visibility = if (pRow.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        }
-
-        container.addView(mainRow)
-        container.addView(pRow)
-        SubtitleTouchHandler.attach(
-            appContext = appContext,
-            windowManager = windowManager,
-            container = container,
-            textView = tv,
-            interactiveViews = listOfNotNull(closeBtn, iconView, paletteBtn, pRow),
-            layoutParamsProvider = { layoutParams },
-            isAttachedProvider = { attached },
-            settingsProvider = settingsProvider,
-            onToggleExpand = { expanded = it },
-            onDragEnd = onPositionChanged,
-            dpFn = ::dp
-        )
-        applySettings(settings)
-    }
-
-    private fun buildMainRow(container: LinearLayout): Pair<LinearLayout, TextView> {
-        val mainRow = LinearLayout(appContext).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val icon = ImageView(appContext).apply {
-            setImageResource(android.R.drawable.ic_btn_speak_now)
-            layoutParams = LinearLayout.LayoutParams(dp(20f), dp(20f)).apply { marginEnd = dp(6f) }
-            setOnClickListener {
-                tempInverted = !tempInverted
-                container.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                applySettings(settingsProvider())
-            }
-        }
-        iconView = icon
-
-        val palette = ImageView(appContext).apply {
-            setImageResource(android.R.drawable.ic_menu_set_as)
-            layoutParams = LinearLayout.LayoutParams(dp(22f), dp(22f)).apply { marginEnd = dp(6f) }
-        }
-        paletteBtn = palette
-
         val tv = TextView(appContext).apply {
             ellipsize = TextUtils.TruncateAt.END
-            setLineSpacing(dp(2.5f).toFloat(), 1.2f)
+            setLineSpacing(dp(2f).toFloat(), 1.2f)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             text = lastText.ifBlank { "AI 听书字幕就绪" }
         }
@@ -248,41 +174,22 @@ class FloatingSubtitleOverlay(
         }
         closeBtn = close
 
-        mainRow.addView(icon)
-        mainRow.addView(palette)
-        mainRow.addView(tv)
-        mainRow.addView(close)
-        return mainRow to tv
-    }
-
-    private fun buildPaletteRow(): LinearLayout = LinearLayout(appContext).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER
-        visibility = View.GONE
-        setPadding(0, dp(6f), 0, dp(2f))
-        SubtitleNovelPreset.entries.forEach { preset ->
-            val chip = TextView(appContext).apply {
-                text = preset.displayName.take(3)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
-                setTextColor(preset.textHex.toInt())
-                setPadding(dp(7f), dp(3f), dp(7f), dp(3f))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(8f).toFloat()
-                    setColor(preset.bgHex.toInt())
-                    setStroke(dp(1f), Color.parseColor("#66808080"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(4f) }
-                setOnClickListener {
-                    tempInverted = false
-                    onPresetSelected(preset)
-                    paletteBar?.visibility = View.GONE
-                }
-            }
-            addView(chip)
-        }
+        container.addView(tv)
+        container.addView(close)
+        SubtitleTouchHandler.attach(
+            appContext = appContext,
+            windowManager = windowManager,
+            container = container,
+            textView = tv,
+            interactiveViews = listOfNotNull(closeBtn),
+            layoutParamsProvider = { layoutParams },
+            isAttachedProvider = { attached },
+            settingsProvider = settingsProvider,
+            onToggleExpand = { expanded = it },
+            onDragEnd = onPositionChanged,
+            dpFn = ::dp
+        )
+        applySettings(settings)
     }
 
     private fun attach() {

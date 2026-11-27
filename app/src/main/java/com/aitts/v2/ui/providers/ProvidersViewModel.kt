@@ -6,11 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.aitts.v2.di.AppContainer
 import com.aitts.v2.engine.audio.AudioEnhancer
 import com.aitts.v2.engine.audio.SonicSpeedScaler
+import com.aitts.v2.engine.provider.DiscoveryCatalog
 import com.aitts.v2.engine.provider.ProviderSynthesisRequest
-import com.aitts.v2.model.AudioProcessingMode
-import com.aitts.v2.model.OfflineCatalogData
 import com.aitts.v2.model.OfflineModelSpec
+import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.ProviderCredentials
+import com.aitts.v2.model.ProviderDescriptorRegistry
+import com.aitts.v2.model.ProviderTemplate
 import com.aitts.v2.model.ProviderType
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.model.VoiceModel
@@ -20,10 +22,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 enum class ProviderAction { SET_ACTIVE, PIN_TOP, MOVE_UP, MOVE_DOWN, DUPLICATE, DELETE }
 
@@ -36,6 +42,8 @@ data class ProvidersUiState(
     val downloadedModelIds: Set<String> = emptySet(),
     val availableVoices: List<VoiceModel> = emptyList(),
     val availableModels: List<String> = emptyList(),
+    val stylesByVoice: Map<String, List<String>> = emptyMap(),
+    val discoveryFromRemote: Boolean = false,
     val isLoadingVoices: Boolean = false,
     val isTestingSingle: Boolean = false,
     val message: String? = null
@@ -50,21 +58,27 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
     val settingsFlow = container.preferences.settingsFlow
     val offlineIncluded = container.offlineIncluded
 
+    val offlineCatalogFlow: StateFlow<List<OfflineModelSpec>> = container.manifestRepository.manifestFlow
+        .map { mergedOfflineCatalog() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), mergedOfflineCatalog())
+
     private var singleTestJob: Job? = null
 
     init {
         refreshInstalledOfflineModels()
     }
 
-    fun consumeMessage() {
-        _uiState.update { it.copy(message = null) }
+    fun consumeMessage() = _uiState.update { it.copy(message = null) }
+
+    private fun mergedOfflineCatalog(): List<OfflineModelSpec> {
+        val remote = container.manifestRepository.offlineModels()
+        val remoteIds = remote.mapTo(HashSet()) { it.id }
+        val localExtras = container.modelInstaller.listInstalledSpecs().filter { it.id !in remoteIds }
+        return remote + localExtras
     }
 
     fun refreshInstalledOfflineModels() {
-        val installed = OfflineCatalogData.models
-            .filter { container.modelInstaller.isModelInstalled(it.id) }
-            .map { it.id }
-            .toSet()
+        val installed = container.modelInstaller.listInstalledIds()
         _uiState.update { it.copy(downloadedModelIds = installed) }
     }
 
@@ -79,32 +93,55 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun toggleEnabled(config: TtsProviderConfig, enabled: Boolean) {
+    fun toggleEnabled(config: TtsProviderConfig, enabled: Boolean) =
         container.preferences.upsertProvider(config.copy(enabled = enabled))
-    }
 
-    fun getProvider(id: String): TtsProviderConfig? =
-        providersFlow.value.find { it.id == id }
-
-    fun getCredentials(id: String): ProviderCredentials =
-        container.preferences.getCredentials(id)
+    fun getProvider(id: String): TtsProviderConfig? = providersFlow.value.find { it.id == id }
+    fun getCredentials(id: String): ProviderCredentials = container.preferences.getCredentials(id)
 
     fun saveProvider(config: TtsProviderConfig, credentials: ProviderCredentials) {
         container.preferences.upsertProvider(config, credentials)
         _uiState.update { it.copy(message = "配置已保存") }
     }
 
-    fun exportShareToken(provider: TtsProviderConfig, includeSecrets: Boolean): String =
-        container.backupManager.exportProviderToken(provider, includeSecrets)
-
-    fun importShareToken(token: String) {
-        val res = container.backupManager.importProviderToken(token)
-        _uiState.update {
-            it.copy(message = res.fold(
-                onSuccess = { p -> "已导入: ${p.name}" },
-                onFailure = { e -> "导入失败: ${e.message}" }
-            ))
+    fun createProviderFromTemplate(template: ProviderTemplate): String {
+        val id = "${template.config.type.name.lowercase()}_${UUID.randomUUID().toString().take(6)}"
+        val descriptor = ProviderDescriptorRegistry.descriptorFor(template.config.type)
+        val tplHost = runCatching { java.net.URI(template.config.baseUrl).host?.lowercase() }.getOrNull()
+        val officialHost = runCatching { java.net.URI(descriptor.defaultBaseUrl).host?.lowercase() }.getOrNull()
+        val resolvedUrl = if (template.config.baseUrl.isBlank() || (tplHost != null && tplHost == officialHost)) {
+            container.manifestRepository.defaultEndpointFor(template.config.type).ifBlank { template.config.baseUrl }
+        } else {
+            template.config.baseUrl
         }
+        container.preferences.upsertProvider(template.config.copy(id = id, baseUrl = resolvedUrl))
+        return id
+    }
+
+    fun activateOfflineModel(spec: OfflineModelSpec) {
+        val existing = providersFlow.value.firstOrNull {
+            it.type == ProviderType.OFFLINE_SHERPA && it.modelName == spec.id
+        }
+        val targetId = if (existing != null) {
+            existing.id
+        } else {
+            val newId = "sherpa_${UUID.randomUUID().toString().take(6)}"
+            container.preferences.upsertProvider(
+                TtsProviderConfig(
+                    id = newId,
+                    type = ProviderType.OFFLINE_SHERPA,
+                    name = spec.name,
+                    modelName = spec.id,
+                    voiceId = spec.defaultVoiceId,
+                    sampleRate = spec.sampleRate,
+                    audioFormat = "wav",
+                    extraParams = mapOf("numThreads" to "2", "silenceScale" to "0.2")
+                )
+            )
+            newId
+        }
+        container.preferences.setActiveProviderId(targetId)
+        _uiState.update { it.copy(message = "已启用离线声线：${spec.name}") }
     }
 
     fun testAllLatencies() {
@@ -118,8 +155,7 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
                         val start = System.currentTimeMillis()
                         val res = container.providerRegistry.get(p.type)
                             .testConnection(p, container.preferences.getCredentials(p.id))
-                        val cost = if (res.isSuccess) System.currentTimeMillis() - start else -1L
-                        p.id to cost
+                        p.id to if (res.isSuccess) System.currentTimeMillis() - start else -1L
                     }
                 }.awaitAll().toMap()
             }
@@ -137,14 +173,39 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { it.copy(message = "已按延迟从低到高排序") }
     }
 
-    fun loadVoicesAndModels(config: TtsProviderConfig, credentials: ProviderCredentials) {
+    fun loadVoicesAndModels(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials,
+        forceRefresh: Boolean = false
+    ) {
         _uiState.update { it.copy(isLoadingVoices = true) }
+        val credScope = listOf(
+            credentials.apiKey.trim(),
+            credentials.secondaryApiKey.trim(),
+            config.extraParams["appId"].orEmpty().trim()
+        ).joinToString("|")
         viewModelScope.launch(Dispatchers.IO) {
-            val provider = container.providerRegistry.get(config.type)
-            val voices = runCatching { provider.fetchVoices(config, credentials) }.getOrDefault(emptyList())
-            val models = runCatching { provider.fetchModels(config, credentials) }.getOrDefault(emptyList())
+            val cached: DiscoveryCatalog? = if (!forceRefresh) {
+                container.discoveryCache.get(config.type, config.baseUrl, config.modelName, credScope)
+            } else {
+                null
+            }
+            val catalog = cached ?: container.providerRegistry.get(config.type)
+                .discoverCatalog(config, credentials)
+                .also { container.discoveryCache.put(config.type, config.baseUrl, config.modelName, it, credScope) }
+
             _uiState.update {
-                it.copy(availableVoices = voices, availableModels = models, isLoadingVoices = false)
+                it.copy(
+                    availableVoices = catalog.voices,
+                    availableModels = catalog.models,
+                    stylesByVoice = catalog.stylesByVoice,
+                    discoveryFromRemote = catalog.fromRemote,
+                    isLoadingVoices = false,
+                    message = if (forceRefresh) {
+                        if (catalog.fromRemote) "已同步上游 (${catalog.voices.size} 音色 / ${catalog.models.size} 模型)"
+                        else "上游不可达或未填密钥，已展示本地预置清单"
+                    } else null
+                )
             }
         }
     }
@@ -167,7 +228,7 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
                             container.previewPlayer.openStream(24000)
                             container.previewPlayer.writeChunk(finalPcm)
                             container.previewPlayer.finishStream()
-                            _uiState.update { it.copy(isTestingSingle = false, message = "试听完成 (${finalPcm.size} bytes)") }
+                            _uiState.update { it.copy(isTestingSingle = false, message = "试听完成") }
                         },
                         onFailure = { e ->
                             _uiState.update { it.copy(isTestingSingle = false, message = "解码失败: ${e.message}") }
@@ -184,7 +245,7 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
     private fun applyPreviewEffects(
         rawPcm: ByteArray,
         config: TtsProviderConfig,
-        caps: com.aitts.v2.model.ProviderCapabilities
+        caps: ProviderCapabilities
     ): ByteArray {
         val scaled = if (config.requiresClientSpeedScaling(isStreaming = false, capabilities = caps)) {
             val scaler = SonicSpeedScaler(24000, 1, config.speed)
@@ -192,16 +253,11 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         } else {
             rawPcm
         }
-        val settings = settingsFlow.value
-        val mode = settings.audioProcessingMode
-        val gain = if (mode == AudioProcessingMode.CUSTOM) settings.loudnessGainFactor else mode.defaultGain
         return AudioEnhancer().processPcm(
-            scaled,
-            1,
-            mode,
-            settings.voiceClarityBoostEnabled,
-            gain,
-            trimSilence = settings.trimDeadSilence
+            pcmData = scaled,
+            channels = 1,
+            gain = 1.0f,
+            trimSilence = settingsFlow.value.trimDeadSilence
         )
     }
 
@@ -212,7 +268,13 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { it.copy(isTestingSingle = false) }
     }
 
-    fun downloadOfflineModel(spec: OfflineModelSpec) {
+    fun manageOfflineModel(spec: OfflineModelSpec, download: Boolean) {
+        if (!download) {
+            container.modelInstaller.deleteModel(spec.id)
+            refreshInstalledOfflineModels()
+            _uiState.update { it.copy(message = "已清理模型文件") }
+            return
+        }
         if (_uiState.value.downloadingModelId != null) return
         _uiState.update { it.copy(downloadingModelId = spec.id, downloadProgress = 0, downloadMessage = "准备下载...") }
         viewModelScope.launch {
@@ -225,24 +287,30 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
                     downloadingModelId = null,
                     downloadProgress = 0,
                     downloadMessage = "",
-                    message = res.fold(
-                        onSuccess = { "${spec.name} 下载就绪" },
-                        onFailure = { e -> "下载失败: ${e.message}" }
-                    )
+                    message = res.fold(onSuccess = { "${spec.name} 下载就绪" }, onFailure = { e -> "下载失败: ${e.message}" })
                 )
             }
         }
     }
 
-    fun deleteOfflineModel(modelId: String) {
-        container.modelInstaller.deleteModel(modelId)
-        refreshInstalledOfflineModels()
-        _uiState.update { it.copy(message = "已清理模型文件") }
+    fun syncOfflineManifest() {
+        viewModelScope.launch {
+            val res = container.manifestRepository.refresh(settingsFlow.value.manifestUrl)
+            refreshInstalledOfflineModels()
+            _uiState.update {
+                it.copy(message = res.fold(
+                    onSuccess = { "已同步远程清单 (v${it.version})" },
+                    onFailure = { e -> "同步失败: ${e.message}" }
+                ))
+            }
+        }
     }
 
     fun defaultsForType(type: ProviderType): TtsProviderConfig {
-        val preset = com.aitts.v2.model.PresetCatalog.createDefaultProviders().firstOrNull { it.type == type }
-        return preset ?: TtsProviderConfig(id = "new", type = type, name = type.displayName)
+        val tpl = ProviderDescriptorRegistry.templates.firstOrNull { it.config.type == type }?.config
+            ?: TtsProviderConfig(id = "new", type = type, name = type.displayName)
+        val remoteUrl = container.manifestRepository.defaultEndpointFor(type)
+        return if (remoteUrl.isNotBlank() && type != ProviderType.CUSTOM_HTTP) tpl.copy(baseUrl = remoteUrl) else tpl
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

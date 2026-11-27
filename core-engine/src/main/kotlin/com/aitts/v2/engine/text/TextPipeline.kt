@@ -1,16 +1,15 @@
 package com.aitts.v2.engine.text
 
+import com.aitts.v2.engine.pipeline.TextProcessor
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.ReplacementRule
-import com.aitts.v2.model.SegmentRole
 import com.aitts.v2.model.SentenceSegment
 
 /**
- * Strictly ordered 4-stage text preprocessing and segmentation pipeline:
+ * Strictly ordered 3-stage pluggable text pipeline:
  * 1. Clean invisible controls, HTML, Markdown (preserving quotes & URLs).
- * 2. Apply user replacement rules (watermark/URL removal & custom polyphones).
- * 3. Segment text into narrator/dialogue/emotion chunks while quotes are still intact.
- * 4. Apply optional Chinese number & acronym pronunciation normalization per segment.
+ * 2. Apply user replacement rules.
+ * 3. Optional Chinese number/time/currency normalization (primarily for lightweight offline models).
  */
 object TextPipeline {
 
@@ -21,52 +20,41 @@ object TextPipeline {
     ): List<SentenceSegment> {
         if (rawText.isBlank()) return emptyList()
 
-        val cleaned = TextCleanerAndRules.cleanMarkup(rawText)
-        val afterRules = TextCleanerAndRules.applyRules(cleaned, rules)
-        val normalizedSpace = TextCleanerAndRules.normalizeWhitespace(afterRules)
+        val preCleanChain = listOf(
+            TextProcessor { TextCleanerAndRules.cleanMarkup(it) },
+            TextProcessor { TextCleanerAndRules.applyRules(it, rules) },
+            TextProcessor { TextCleanerAndRules.normalizeWhitespace(it) }
+        )
+        val normalizedSpace = preCleanChain.fold(rawText) { acc, processor -> processor.process(acc) }
         if (normalizedSpace.isBlank()) return emptyList()
 
-        val rawSegments = if (!settings.isSentenceSplittingEnabled) {
-            listOf(SentenceSegment(normalizedSpace, SegmentRole.NARRATOR))
-        } else {
-            DialogueSegmenter.segment(
-                text = normalizedSpace,
-                mode = settings.textSegmentationMode,
-                mergeShort = settings.mergeShortParagraphs,
-                minMergeLen = settings.minMergeParagraphLength,
-                splitLong = settings.splitLongParagraphs,
-                maxLen = settings.maxSegmentLength,
-                ultraLowLatency = settings.ultraLowLatencyMode
-            )
-        }
+        val rawSegments = TextSegmenter.segment(
+            text = normalizedSpace,
+            smartSplittingEnabled = settings.isSmartSegmentationEnabled
+        )
 
         return rawSegments.mapNotNull { seg ->
-            var text = seg.text
-            if (settings.isNumberNormalizationEnabled) {
-                text = ChineseNumberNormalizer.normalize(text)
+            val finalText = if (settings.isNumberNormalizationEnabled) {
+                TextCleanerAndRules.normalizeWhitespace(ChineseNumberNormalizer.normalize(seg.text))
+            } else {
+                seg.text
             }
-            if (settings.isAcronymNormalizationEnabled) {
-                text = AcronymNormalizer.normalize(text)
-            }
-            text = TextCleanerAndRules.normalizeWhitespace(text)
-            if (text.isBlank()) null else seg.copy(text = text)
+            if (finalText.isBlank()) null else seg.copy(text = finalText)
         }
     }
 
     /**
-     * Single-string preview preprocessing (used for trial workbench before synthesis).
+     * Single-string preview preprocessing for the Pronunciation Dictionary workbench.
      */
     fun preprocessFlat(
         rawText: String,
         rules: List<ReplacementRule>,
-        enableNumbers: Boolean,
-        enableAcronyms: Boolean
+        enableNumbers: Boolean
     ): String {
         if (rawText.isBlank()) return ""
         var res = TextCleanerAndRules.cleanMarkup(rawText)
         res = TextCleanerAndRules.applyRules(res, rules)
         if (enableNumbers) res = ChineseNumberNormalizer.normalize(res)
-        if (enableAcronyms) res = AcronymNormalizer.normalize(res)
         return TextCleanerAndRules.normalizeWhitespace(res)
     }
 }

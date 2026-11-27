@@ -54,26 +54,46 @@ class MimoTtsProvider(
     override suspend fun fetchModels(
         config: TtsProviderConfig,
         credentials: ProviderCredentials
-    ): List<String> = withContext(Dispatchers.IO) {
+    ): List<String> = fetchModelsInternal(config, credentials).first
+
+    override suspend fun discoverCatalog(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): DiscoveryCatalog {
+        val (models, fromRemote) = fetchModelsInternal(config, credentials)
+        return DiscoveryCatalog(
+            models = models,
+            voices = PresetVoices.mimoVoices,
+            resolvedEndpoint = resolveEndpoint(config.baseUrl),
+            fromRemote = fromRemote
+        )
+    }
+
+    private suspend fun fetchModelsInternal(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): Pair<List<String>, Boolean> = withContext(Dispatchers.IO) {
         val fallback = listOf("mimo-v2.5-tts", "mimo-v2-tts")
-        if (credentials.apiKey.isBlank()) return@withContext fallback
+        if (credentials.apiKey.isBlank()) return@withContext fallback to false
         val base = resolveEndpoint(config.baseUrl).substringBefore("/chat/completions").trimEnd('/')
         val req = Request.Builder()
             .url("$base/models")
             .addHeader("Authorization", "Bearer ${credentials.apiKey.trim()}")
             .addHeader("api-key", credentials.apiKey.trim())
             .build()
-        runCatching {
+        var fromRemote = false
+        val fetched = runCatching {
             HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
-                if (!resp.isSuccessful) return@executeTracked fallback
+                if (!resp.isSuccessful) return@executeTracked emptyList()
                 val root = HttpCallSupport.json.decodeFromString<JsonObject>(resp.body?.string().orEmpty())
                 root["data"]?.jsonArray
                     ?.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
                     ?.filter { it.contains("mimo", ignoreCase = true) || it.contains("tts", ignoreCase = true) }
-                    ?.ifEmpty { fallback }
-                    ?: fallback
+                    ?.also { if (it.isNotEmpty()) fromRemote = true }
+                    .orEmpty()
             }
-        }.getOrDefault(fallback)
+        }.getOrDefault(emptyList())
+        fetched.ifEmpty { fallback } to fromRemote
     }
 
     override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> =

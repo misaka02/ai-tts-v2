@@ -16,15 +16,14 @@ class CoreModelTest {
     }
 
     @Test
-    fun `every default offline provider references a valid OfflineCatalogData spec`() {
-        val offlineProviders = PresetCatalog.createDefaultProviders()
-            .filter { it.type == ProviderType.OFFLINE_SHERPA }
+    fun `descriptor registry covers every ProviderType and default catalog has single ready edge node`() {
+        val all = ProviderDescriptorRegistry.allDescriptors()
+        assertEquals(ProviderType.entries.size, all.size)
 
-        assertTrue(offlineProviders.isNotEmpty())
-        for (provider in offlineProviders) {
-            val spec = OfflineCatalogData.findById(provider.modelName)
-            assertNotNull("Missing offline catalog model for ${provider.modelName}", spec)
-        }
+        val defaults = PresetCatalog.createDefaultProviders()
+        assertEquals(1, defaults.size)
+        assertEquals(ProviderType.EDGE_TTS, defaults.single().type)
+        assertTrue(defaults.single().enabled)
     }
 
     @Test
@@ -85,10 +84,20 @@ class CoreModelTest {
     }
 
     @Test
-    fun `legacy GlobalSettings json without floatingSubtitleY defaults cleanly`() {
-        val legacyJson = """{"activeProviderId":"edge_tts_xiaoxiao","isFloatingSubtitleEnabled":true}"""
+    fun `legacy GlobalSettings json with removed fields deserializes cleanly`() {
+        val legacyJson = """
+            {
+              "activeProviderId": "edge_tts_xiaoxiao",
+              "isFloatingSubtitleEnabled": true,
+              "audioProcessingMode": "WARM",
+              "isAcronymNormalizationEnabled": true,
+              "floatingSubtitleNovelPreset": "PARCHMENT",
+              "ultraLowLatencyMode": true
+            }
+        """.trimIndent()
         val decoded = json.decodeFromString<GlobalSettings>(legacyJson)
         assertEquals(-1, decoded.floatingSubtitleY)
+        assertFalse(decoded.isNumberNormalizationEnabled)
         assertTrue(decoded.isFloatingSubtitleEnabled)
     }
 }

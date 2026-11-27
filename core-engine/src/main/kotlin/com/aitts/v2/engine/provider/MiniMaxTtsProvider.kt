@@ -11,6 +11,7 @@ import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.model.VoiceModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
@@ -32,13 +33,27 @@ class MiniMaxTtsProvider(
     override val capabilities = ProviderCapabilities(
         supportsNativePcmStreaming = true,
         supportsNativeSpeedInBatch = true,
-        supportsNativeSpeedInStream = true
+        supportsNativeSpeedInStream = true,
+        supportsVoiceDiscovery = true
     )
 
     override suspend fun fetchVoices(
         config: TtsProviderConfig,
         credentials: ProviderCredentials
-    ): List<VoiceModel> = PresetVoices.minimaxVoices
+    ): List<VoiceModel> = fetchVoicesInternal(config, credentials).first
+
+    override suspend fun discoverCatalog(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): DiscoveryCatalog {
+        val (voices, fromRemote) = fetchVoicesInternal(config, credentials)
+        return DiscoveryCatalog(
+            models = listOf("speech-02-turbo", "speech-02", "speech-01-turbo", "speech-01-hd"),
+            voices = voices,
+            resolvedEndpoint = config.baseUrl.trim().ifBlank { DEFAULT_TTS_URL },
+            fromRemote = fromRemote
+        )
+    }
 
     override suspend fun fetchModels(
         config: TtsProviderConfig,
@@ -58,8 +73,7 @@ class MiniMaxTtsProvider(
 
             runCatching {
                 HttpCallSupport.executeTracked(httpManager, request.sessionId, httpReq) { resp ->
-                    val bytes = resp.body?.bytes() ?: ByteArray(0)
-                    val bodyStr = String(bytes, Charsets.UTF_8)
+                    val bodyStr = String(resp.body?.bytes() ?: ByteArray(0), Charsets.UTF_8)
                     if (!resp.isSuccessful) {
                         throw IOException("MiniMax HTTP ${resp.code}: ${bodyStr.take(300)}")
                     }
@@ -105,8 +119,7 @@ class MiniMaxTtsProvider(
                     val audioStr = root["data"]?.jsonObject?.get("audio")?.jsonPrimitive?.content
                         ?: root["audio"]?.jsonPrimitive?.content
                         ?: return@readDataEvents
-                    val raw = decodeAudioStr(audioStr)
-                    val aligned = aligner.push(raw)
+                    val aligned = aligner.push(decodeAudioStr(audioStr))
                     if (aligned.isNotEmpty()) {
                         collector.write(aligned)
                         onChunk(PcmStreamChunk(aligned, sampleRate))
@@ -120,6 +133,41 @@ class MiniMaxTtsProvider(
         }
     }
 
+    private suspend fun fetchVoicesInternal(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): Pair<List<VoiceModel>, Boolean> = withContext(Dispatchers.IO) {
+        val apiKey = credentials.apiKey.trim()
+        if (apiKey.isBlank()) return@withContext PresetVoices.minimaxVoices to false
+
+        val req = Request.Builder()
+            .url(resolveGetVoiceUrl(config.baseUrl))
+            .post("""{"voice_type":"all"}""".toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .build()
+
+        var fromRemote = false
+        val fetched = runCatching {
+            HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
+                if (!resp.isSuccessful) return@executeTracked emptyList()
+                val root = HttpCallSupport.json.decodeFromString<JsonObject>(resp.body?.string().orEmpty())
+                val sys = parseMiniMaxVoiceArray(root["system_voice"] as? JsonArray, "系统")
+                val cloned = parseMiniMaxVoiceArray(root["voice_cloning"] as? JsonArray, "复刻")
+                (cloned + sys).also { if (it.isNotEmpty()) fromRemote = true }
+            }
+        }.getOrDefault(emptyList())
+        fetched.ifEmpty { PresetVoices.minimaxVoices } to fromRemote
+    }
+
+    private fun parseMiniMaxVoiceArray(arr: JsonArray?, tag: String): List<VoiceModel> =
+        arr?.mapNotNull { elem ->
+            val obj = elem.jsonObject
+            val id = obj["voice_id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            val name = obj["voice_name"]?.jsonPrimitive?.content ?: id
+            VoiceModel(id = id, name = "$name ($tag)", gender = "Neutral", locale = "zh-CN")
+        }.orEmpty()
+
     private fun buildRequest(
         cfg: TtsProviderConfig,
         apiKey: String,
@@ -128,8 +176,9 @@ class MiniMaxTtsProvider(
         format: String,
         sampleRate: Int
     ): Request {
-        val url = cfg.baseUrl.trim().ifBlank { "https://api.minimax.chat/v1/t2a_v2" }
+        val url = cfg.baseUrl.trim().ifBlank { DEFAULT_TTS_URL }
         val pitchVal = ((cfg.pitch - 1.0f) * 12).toInt().coerceIn(-12, 12)
+        val emotion = cfg.extraParams["emotion"]?.trim().orEmpty()
         val payload = buildJsonObject {
             put("model", cfg.modelName.ifBlank { "speech-02-turbo" })
             put("text", text)
@@ -139,6 +188,7 @@ class MiniMaxTtsProvider(
                 put("speed", cfg.speed)
                 put("vol", 1.0)
                 put("pitch", pitchVal)
+                if (emotion.isNotBlank()) put("emotion", emotion)
             })
             put("audio_setting", buildJsonObject {
                 put("sample_rate", sampleRate)
@@ -156,6 +206,17 @@ class MiniMaxTtsProvider(
             .build()
     }
 
+    private fun resolveGetVoiceUrl(rawBase: String): String {
+        val clean = rawBase.trim().trimEnd('/')
+        if (clean.isBlank()) return "https://api.minimax.chat/v1/get_voice"
+        return when {
+            clean.contains("/v1/t2a_v2") -> clean.replace("/v1/t2a_v2", "/v1/get_voice")
+            clean.contains("/t2a_v2") -> clean.replace("/t2a_v2", "/get_voice")
+            clean.endsWith("/v1") -> "$clean/get_voice"
+            else -> "$clean/v1/get_voice"
+        }
+    }
+
     private fun decodeAudioStr(raw: String): ByteArray {
         val trimmed = raw.trim()
         val isHex = trimmed.length % 2 == 0 && trimmed.take(64).all {
@@ -169,5 +230,9 @@ class MiniMaxTtsProvider(
         } else {
             Base64.getMimeDecoder().decode(trimmed)
         }
+    }
+
+    companion object {
+        private const val DEFAULT_TTS_URL = "https://api.minimax.chat/v1/t2a_v2"
     }
 }

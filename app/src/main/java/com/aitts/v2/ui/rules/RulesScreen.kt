@@ -74,12 +74,11 @@ fun RulesScreen(viewModel: RulesViewModel) {
         val cat = state.selectedCategory
         if (cat == null) rules else rules.filter { it.category == cat }
     }
-    val processedPreview = remember(state.previewInput, rules, settings) {
+    val processedPreview = remember(state.previewInput, rules, settings.isNumberNormalizationEnabled) {
         TextPipeline.preprocessFlat(
             rawText = state.previewInput,
             rules = rules,
-            enableNumbers = settings.isNumberNormalizationEnabled,
-            enableAcronyms = settings.isAcronymNormalizationEnabled
+            enableNumbers = settings.isNumberNormalizationEnabled
         )
     }
 
@@ -97,7 +96,7 @@ fun RulesScreen(viewModel: RulesViewModel) {
                 Column {
                     Text("发音词典", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        text = "共 ${rules.size} 条纠音与净化规则",
+                        text = "共 ${rules.size} 条净化与纠音规则",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -120,18 +119,11 @@ fun RulesScreen(viewModel: RulesViewModel) {
                     label = { Text("输入测试原文") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = settings.isNumberNormalizationEnabled,
-                        onClick = { viewModel.toggleNumberNormalization(!settings.isNumberNormalizationEnabled) },
-                        label = { Text("数字规整") }
-                    )
-                    FilterChip(
-                        selected = settings.isAcronymNormalizationEnabled,
-                        onClick = { viewModel.toggleAcronymNormalization(!settings.isAcronymNormalizationEnabled) },
-                        label = { Text("英文缩写") }
-                    )
-                }
+                FilterChip(
+                    selected = settings.isNumberNormalizationEnabled,
+                    onClick = { viewModel.toggleNumberNormalization(!settings.isNumberNormalizationEnabled) },
+                    label = { Text("中文数字规整 (主要供轻量离线 VITS 模型开启)") }
+                )
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceContainer,
@@ -147,8 +139,7 @@ fun RulesScreen(viewModel: RulesViewModel) {
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = viewModel::importXianxiaPack, modifier = Modifier.weight(1f)) { Text("+ 修仙多音字") }
-                OutlinedButton(onClick = viewModel::importNovelSymbolsPack, modifier = Modifier.weight(1f)) { Text("+ 符号净化") }
+                OutlinedButton(onClick = viewModel::importNovelSymbolsPack, modifier = Modifier.weight(1f)) { Text("+ 符号净化包") }
                 OutlinedButton(onClick = { viewModel.batchToggle(true) }) { Text("全开") }
                 OutlinedButton(onClick = { viewModel.batchToggle(false) }) { Text("全关") }
             }

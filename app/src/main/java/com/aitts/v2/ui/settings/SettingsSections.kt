@@ -18,6 +18,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -28,9 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.aitts.v2.model.AudioProcessingMode
 import com.aitts.v2.model.GlobalSettings
-import com.aitts.v2.model.SegmentationMode
 import com.aitts.v2.model.SpeedPolicy
 import com.aitts.v2.model.ThemeMode
 import com.aitts.v2.model.ThemePalette
@@ -54,69 +54,37 @@ internal fun SystemSubtitleSection(
             checked = settings.isFloatingSubtitleEnabled,
             onCheckedChange = onToggleSubtitle
         )
-        InkActionRow("悬浮字幕样式定制", settings.floatingSubtitleNovelPreset.displayName, onOpenSubtitleSheet)
+        InkActionRow(
+            "悬浮字幕微调",
+            "${settings.floatingSubtitleFontSize}sp · ${(settings.floatingSubtitleOpacity * 100).toInt()}% 不透明",
+            onOpenSubtitleSheet
+        )
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun SegmentationSection(
+internal fun SegmentationAcousticsSection(
     settings: GlobalSettings,
     onUpdate: ((GlobalSettings) -> GlobalSettings) -> Unit
 ) {
     InkPaperCard(padding = 14.dp) {
-        InkSwitchRow("启用分段切分与并发预取", settings.isSentenceSplittingEnabled) { c ->
-            onUpdate { it.copy(isSentenceSplittingEnabled = c) }
+        InkSwitchRow("长文智能分段与并发预加载", settings.isSmartSegmentationEnabled) { c ->
+            onUpdate { it.copy(isSmartSegmentationEnabled = c) }
         }
-        if (settings.isSentenceSplittingEnabled) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SegmentationMode.entries.forEach { m ->
-                    FilterChip(
-                        selected = settings.textSegmentationMode == m,
-                        onClick = { onUpdate { it.copy(textSegmentationMode = m) } },
-                        label = { Text(m.displayName) }
-                    )
-                }
-            }
-            InkSwitchRow("短段落自动合并", settings.mergeShortParagraphs) { c ->
-                onUpdate { it.copy(mergeShortParagraphs = c) }
-            }
-            InkSwitchRow("超长段落按句末标点拆分", settings.splitLongParagraphs) { c ->
-                onUpdate { it.copy(splitLongParagraphs = c) }
-            }
-            InkSwitchRow("滑动窗口并发预加载", settings.enableSegmentPreload) { c ->
-                onUpdate { it.copy(enableSegmentPreload = c) }
-            }
+        if (settings.isSmartSegmentationEnabled) {
             Text("预加载前瞻深度: ${settings.preloadAheadCount} 段", style = MaterialTheme.typography.bodySmall)
             Slider(
                 value = settings.preloadAheadCount.toFloat(),
                 onValueChange = { v -> onUpdate { it.copy(preloadAheadCount = v.toInt()) } },
-                valueRange = 1f..4f,
-                steps = 2
+                valueRange = 1f..3f,
+                steps = 1
             )
         }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun AcousticsSection(
-    settings: GlobalSettings,
-    onUpdate: ((GlobalSettings) -> GlobalSettings) -> Unit
-) {
-    InkPaperCard(padding = 14.dp) {
         Text("全局语速倍率 ${"%.2f".format(settings.globalSpeed)}×", style = MaterialTheme.typography.bodySmall)
-        Slider(
-            value = settings.globalSpeed,
-            onValueChange = { v -> onUpdate { it.copy(globalSpeed = v) } },
-            valueRange = 0.5f..2.0f
-        )
+        Slider(value = settings.globalSpeed, onValueChange = { v -> onUpdate { it.copy(globalSpeed = v) } }, valueRange = 0.5f..2.0f)
         Text("全局音调倍率 ${"%.2f".format(settings.globalPitch)}", style = MaterialTheme.typography.bodySmall)
-        Slider(
-            value = settings.globalPitch,
-            onValueChange = { v -> onUpdate { it.copy(globalPitch = v) } },
-            valueRange = 0.5f..2.0f
-        )
+        Slider(value = settings.globalPitch, onValueChange = { v -> onUpdate { it.copy(globalPitch = v) } }, valueRange = 0.5f..2.0f)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SpeedPolicy.entries.forEach { p ->
                 FilterChip(
@@ -126,47 +94,26 @@ internal fun AcousticsSection(
                 )
             }
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            AudioProcessingMode.entries.forEach { m ->
-                FilterChip(
-                    selected = settings.audioProcessingMode == m,
-                    onClick = { onUpdate { it.copy(audioProcessingMode = m) } },
-                    label = { Text(m.displayName) }
-                )
-            }
-        }
-        if (settings.audioProcessingMode == AudioProcessingMode.CUSTOM) {
-            InkSwitchRow("人声清晰度滤波增强", settings.voiceClarityBoostEnabled) { c ->
-                onUpdate { it.copy(voiceClarityBoostEnabled = c) }
-            }
-            Text("响度增益倍率 ${"%.2f".format(settings.loudnessGainFactor)}×", style = MaterialTheme.typography.bodySmall)
-            Slider(
-                value = settings.loudnessGainFactor,
-                onValueChange = { v -> onUpdate { it.copy(loudnessGainFactor = v) } },
-                valueRange = 0.6f..1.8f
-            )
-        }
         Text("句间自然停顿: ${settings.sentencePauseMs} ms", style = MaterialTheme.typography.bodySmall)
         Slider(
             value = settings.sentencePauseMs.toFloat(),
             onValueChange = { v -> onUpdate { it.copy(sentencePauseMs = v.toInt()) } },
             valueRange = 0f..600f
         )
-        InkSwitchRow("首尾死区静音裁剪", settings.trimDeadSilence) { c ->
+        InkSwitchRow("无损首尾死区静音裁剪", settings.trimDeadSilence) { c ->
             onUpdate { it.copy(trimDeadSilence = c) }
-        }
-        InkSwitchRow("对白微情绪提示词注入", settings.isEmotionProsodyEnabled) { c ->
-            onUpdate { it.copy(isEmotionProsodyEnabled = c) }
         }
     }
 }
 
 @Composable
-internal fun NetworkResilienceSection(
+internal fun NetworkManifestSection(
     settings: GlobalSettings,
     providers: List<TtsProviderConfig>,
+    isBusy: Boolean,
     onUpdate: ((GlobalSettings) -> GlobalSettings) -> Unit,
-    onOpenProxyDialog: () -> Unit
+    onOpenProxyDialog: () -> Unit,
+    onSyncManifest: () -> Unit
 ) {
     InkPaperCard(padding = 14.dp) {
         val proxySummary = if (settings.proxyEnabled) {
@@ -182,7 +129,6 @@ internal fun NetworkResilienceSection(
             onUpdate { it.copy(autoFallbackOnFailure = c) }
         }
         if (settings.autoFallbackOnFailure) {
-            Text("指定兜底节点", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -195,6 +141,15 @@ internal fun NetworkResilienceSection(
                     )
                 }
             }
+        }
+        OutlinedTextField(
+            value = settings.manifestUrl,
+            onValueChange = { url -> onUpdate { it.copy(manifestUrl = url) } },
+            label = { Text("远程上游清单 URL (Manifest)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedButton(onClick = onSyncManifest, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
+            Text(if (isBusy) "同步中..." else "立即同步上游默认端点与离线清单")
         }
     }
 }
@@ -225,9 +180,7 @@ internal fun ThemeBackupSection(
                 FilterChip(
                     selected = settings.themePalette == p,
                     onClick = { onUpdate { it.copy(themePalette = p) } },
-                    leadingIcon = {
-                        Box(modifier = Modifier.size(10.dp).background(Color(p.seedHex), CircleShape))
-                    },
+                    leadingIcon = { Box(modifier = Modifier.size(10.dp).background(Color(p.seedHex), CircleShape)) },
                     label = { Text(p.displayName) }
                 )
             }
@@ -246,10 +199,10 @@ internal fun ThemeBackupSection(
                 valueRange = 50f..1000f
             )
         }
-        InkActionRow("清空磁盘音频缓存", "当前 ${cacheStats.first} 个分片 · ${"%.2f".format(cacheStats.second)} MB", onClearCache)
-        InkActionRow("请求诊断日志", "查看分段耗时与网络详情", onOpenLogs)
-        InkActionRow("全量配置备份 / 恢复", "支持剪贴板脱敏口令与 JSON 文件导入导出", onOpenBackup)
-        InkActionRow("恢复官方默认设置", "重置全局参数、引擎与词典规则 (保留 Keystore 密钥)", onOpenReset)
+        InkActionRow("清空音频与上游发现缓存", "当前 ${cacheStats.first} 个分片 · ${"%.2f".format(cacheStats.second)} MB", onClearCache)
+        InkActionRow("请求诊断日志", "查看分段耗时与系统传入倍速详情", onOpenLogs)
+        InkActionRow("全量配置备份 / 恢复", "支持剪贴板脱敏与 JSON 文件导入导出", onOpenBackup)
+        InkActionRow("恢复默认设置", "重置偏好、默认 Edge 引擎与规则 (保留密钥)", onOpenReset)
     }
 }
 

@@ -34,25 +34,19 @@ class FishAudioTtsProvider(
     override suspend fun fetchVoices(
         config: TtsProviderConfig,
         credentials: ProviderCredentials
-    ): List<VoiceModel> = withContext(Dispatchers.IO) {
-        val apiKey = credentials.apiKey.trim()
-        if (apiKey.isBlank()) return@withContext PresetVoices.fishAudioVoices
-        val req = Request.Builder()
-            .url("https://api.fish.audio/model?page_size=30")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .build()
-        runCatching {
-            HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
-                if (!resp.isSuccessful) return@executeTracked PresetVoices.fishAudioVoices
-                val root = HttpCallSupport.json.decodeFromString<JsonObject>(resp.body?.string().orEmpty())
-                root["items"]?.jsonArray?.mapNotNull { elem ->
-                    val obj = elem.jsonObject
-                    val id = obj["_id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val title = obj["title"]?.jsonPrimitive?.content ?: id
-                    VoiceModel(id = id, name = title, gender = "Neutral", locale = "zh-CN")
-                }?.ifEmpty { PresetVoices.fishAudioVoices } ?: PresetVoices.fishAudioVoices
-            }
-        }.getOrDefault(PresetVoices.fishAudioVoices)
+    ): List<VoiceModel> = fetchVoicesInternal(config, credentials).first
+
+    override suspend fun discoverCatalog(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): DiscoveryCatalog {
+        val (voices, fromRemote) = fetchVoicesInternal(config, credentials)
+        return DiscoveryCatalog(
+            models = listOf("speech-1.5", "speech-1.4"),
+            voices = voices,
+            resolvedEndpoint = config.baseUrl.trim().ifBlank { DEFAULT_TTS_URL },
+            fromRemote = fromRemote
+        )
     }
 
     override suspend fun fetchModels(config: TtsProviderConfig, credentials: ProviderCredentials): List<String> =
@@ -65,12 +59,13 @@ class FishAudioTtsProvider(
                 return@withContext Result.failure(IOException("请先填写 Fish Audio API Key"))
             }
             val cfg = request.config
-            val url = cfg.baseUrl.trim().ifBlank { "https://api.fish.audio/v1/tts" }
+            val url = cfg.baseUrl.trim().ifBlank { DEFAULT_TTS_URL }
+            val latency = cfg.extraParams["latency"]?.takeIf { it == "normal" || it == "balanced" } ?: "balanced"
             val payload = buildJsonObject {
                 put("text", request.text)
                 put("reference_id", cfg.voiceId.ifBlank { "7f92f8afb8ec43bf81429cc1c9199cb1" })
                 put("format", if (cfg.audioFormat.equals("wav", ignoreCase = true)) "wav" else "mp3")
-                put("latency", "balanced")
+                put("latency", latency)
                 put("prosody", buildJsonObject { put("speed", cfg.speed.coerceIn(0.5f, 2.0f)) })
                 put("streaming", false)
             }.toString()
@@ -93,4 +88,46 @@ class FishAudioTtsProvider(
                 }
             }
         }
+
+    private suspend fun fetchVoicesInternal(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): Pair<List<VoiceModel>, Boolean> = withContext(Dispatchers.IO) {
+        val apiKey = credentials.apiKey.trim()
+        if (apiKey.isBlank()) return@withContext PresetVoices.fishAudioVoices to false
+
+        val modelsUrl = "${resolveApiRoot(config.baseUrl)}/model?page_size=30"
+        val req = Request.Builder()
+            .url(modelsUrl)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .build()
+        var fromRemote = false
+        val fetched = runCatching {
+            HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
+                if (!resp.isSuccessful) return@executeTracked emptyList()
+                val root = HttpCallSupport.json.decodeFromString<JsonObject>(resp.body?.string().orEmpty())
+                root["items"]?.jsonArray?.mapNotNull { elem ->
+                    val obj = elem.jsonObject
+                    val id = obj["_id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val title = obj["title"]?.jsonPrimitive?.content ?: id
+                    VoiceModel(id = id, name = title, gender = "Neutral", locale = "zh-CN")
+                }?.also { if (it.isNotEmpty()) fromRemote = true }.orEmpty()
+            }
+        }.getOrDefault(emptyList())
+        fetched.ifEmpty { PresetVoices.fishAudioVoices } to fromRemote
+    }
+
+    private fun resolveApiRoot(rawBase: String): String {
+        val clean = rawBase.trim().trimEnd('/')
+        if (clean.isBlank()) return "https://api.fish.audio"
+        return when {
+            clean.endsWith("/v1/tts") -> clean.removeSuffix("/v1/tts")
+            clean.endsWith("/tts") -> clean.removeSuffix("/tts")
+            else -> clean
+        }
+    }
+
+    companion object {
+        private const val DEFAULT_TTS_URL = "https://api.fish.audio/v1/tts"
+    }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -25,8 +26,8 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 /**
- * Unified provider for OpenAI `/v1/audio/speech` and compatible services:
- * OpenAI, SiliconFlow (CosyVoice2 / ChatTTS), StepFun (Step-Audio), and third-party proxies.
+ * Unified provider for OpenAI `/v1/audio/speech` and compatible services
+ * (OpenAI `gpt-4o-mini-tts` with `instructions`, SiliconFlow voice discovery, StepFun, and proxies).
  */
 class OpenAiCompatibleProvider(
     private val httpManager: HttpClientManager
@@ -37,7 +38,7 @@ class OpenAiCompatibleProvider(
         supportsNativePcmStreaming = true,
         supportsNativeSpeedInBatch = true,
         supportsNativeSpeedInStream = true,
-        supportsDirectorPrompt = false,
+        supportsDirectorPrompt = true,
         supportsVoiceDiscovery = true,
         supportsModelDiscovery = true
     )
@@ -45,35 +46,25 @@ class OpenAiCompatibleProvider(
     override suspend fun fetchVoices(
         config: TtsProviderConfig,
         credentials: ProviderCredentials
-    ): List<VoiceModel> = PresetVoices.openAiVoices
+    ): List<VoiceModel> = fetchVoicesInternal(config, credentials).first
 
     override suspend fun fetchModels(
         config: TtsProviderConfig,
         credentials: ProviderCredentials
-    ): List<String> = withContext(Dispatchers.IO) {
-        val fallback = listOf("tts-1", "tts-1-hd", "FunAudioLLM/CosyVoice2-0.5B", "stepaudio-2.5-tts")
-        if (credentials.apiKey.isBlank()) return@withContext fallback
+    ): List<String> = fetchModelsInternal(config, credentials).first
 
-        val modelsUrl = resolveModelsUrl(config.baseUrl)
-        val req = Request.Builder()
-            .url(modelsUrl)
-            .addHeader("Authorization", "Bearer ${credentials.apiKey.trim()}")
-            .build()
-        runCatching {
-            HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
-                if (!resp.isSuccessful) return@executeTracked fallback
-                val body = resp.body?.string().orEmpty()
-                val arr = HttpCallSupport.json.decodeFromString<JsonObject>(body)["data"]?.jsonArray
-                    ?: return@executeTracked fallback
-                arr.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
-                    .filter {
-                        it.contains("tts", ignoreCase = true) ||
-                            it.contains("audio", ignoreCase = true) ||
-                            it.contains("cosyvoice", ignoreCase = true)
-                    }
-                    .ifEmpty { fallback }
-            }
-        }.getOrDefault(fallback)
+    override suspend fun discoverCatalog(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): DiscoveryCatalog {
+        val (models, modelsRemote) = fetchModelsInternal(config, credentials)
+        val (voices, voicesRemote) = fetchVoicesInternal(config, credentials)
+        return DiscoveryCatalog(
+            models = models,
+            voices = voices,
+            resolvedEndpoint = resolveSpeechUrl(config.baseUrl),
+            fromRemote = modelsRemote || voicesRemote
+        )
     }
 
     override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> =
@@ -139,6 +130,76 @@ class OpenAiCompatibleProvider(
         }
     }
 
+    private suspend fun fetchModelsInternal(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): Pair<List<String>, Boolean> = withContext(Dispatchers.IO) {
+        val fallback = listOf("gpt-4o-mini-tts", "tts-1", "tts-1-hd", "FunAudioLLM/CosyVoice2-0.5B")
+        if (credentials.apiKey.isBlank()) return@withContext fallback to false
+
+        val req = Request.Builder()
+            .url(resolveApiSubPath(config.baseUrl, "models"))
+            .addHeader("Authorization", "Bearer ${credentials.apiKey.trim()}")
+            .build()
+        var fromRemote = false
+        val fetched = runCatching {
+            HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
+                if (!resp.isSuccessful) return@executeTracked emptyList()
+                val arr = HttpCallSupport.json.decodeFromString<JsonObject>(resp.body?.string().orEmpty())["data"]?.jsonArray
+                    ?: return@executeTracked emptyList()
+                arr.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
+                    .filter {
+                        it.contains("tts", ignoreCase = true) ||
+                            it.contains("audio", ignoreCase = true) ||
+                            it.contains("cosyvoice", ignoreCase = true)
+                    }.also { if (it.isNotEmpty()) fromRemote = true }
+            }
+        }.getOrDefault(emptyList())
+        fetched.ifEmpty { fallback } to fromRemote
+    }
+
+    private suspend fun fetchVoicesInternal(
+        config: TtsProviderConfig,
+        credentials: ProviderCredentials
+    ): Pair<List<VoiceModel>, Boolean> = withContext(Dispatchers.IO) {
+        val apiKey = credentials.apiKey.trim()
+        if (apiKey.isBlank()) return@withContext PresetVoices.openAiVoices to false
+
+        for (sub in listOf("audio/voice/list", "audio/voices")) {
+            val req = Request.Builder()
+                .url(resolveApiSubPath(config.baseUrl, sub))
+                .addHeader("Authorization", "Bearer $apiKey")
+                .build()
+            val parsed = runCatching {
+                HttpCallSupport.executeTracked(httpManager, "", req) { resp ->
+                    if (!resp.isSuccessful) return@executeTracked emptyList()
+                    parseVoiceArray(resp.body?.string().orEmpty())
+                }
+            }.getOrDefault(emptyList())
+            if (parsed.isNotEmpty()) return@withContext parsed to true
+        }
+        PresetVoices.openAiVoices to false
+    }
+
+    private fun parseVoiceArray(body: String): List<VoiceModel> {
+        val root = runCatching { HttpCallSupport.json.decodeFromString<JsonObject>(body) }.getOrNull() ?: return emptyList()
+        val arr: JsonArray = root["result"] as? JsonArray
+            ?: root["voices"] as? JsonArray
+            ?: root["data"] as? JsonArray
+            ?: return emptyList()
+        return arr.mapNotNull { elem ->
+            val obj = elem.jsonObject
+            val id = obj["uri"]?.jsonPrimitive?.content
+                ?: obj["id"]?.jsonPrimitive?.content
+                ?: obj["voice_id"]?.jsonPrimitive?.content
+                ?: return@mapNotNull null
+            val name = obj["customName"]?.jsonPrimitive?.content
+                ?: obj["name"]?.jsonPrimitive?.content
+                ?: id
+            VoiceModel(id = id, name = name, gender = "Neutral", locale = "zh-CN")
+        }
+    }
+
     private fun buildSpeechRequest(
         cfg: TtsProviderConfig,
         apiKey: String,
@@ -152,6 +213,9 @@ class OpenAiCompatibleProvider(
             put("voice", cfg.voiceId.ifBlank { "nova" })
             put("response_format", format)
             put("speed", cfg.speed)
+            if (cfg.promptInstruction.isNotBlank()) {
+                put("instructions", cfg.promptInstruction.trim())
+            }
         }.toString()
 
         return Request.Builder()
@@ -172,14 +236,13 @@ class OpenAiCompatibleProvider(
         }
     }
 
-    private fun resolveModelsUrl(raw: String): String {
+    private fun resolveApiSubPath(raw: String, subPath: String): String {
         val url = raw.trim().trimEnd('/')
         return when {
-            url.isBlank() -> "https://api.openai.com/v1/models"
-            url.contains("/audio/speech") -> url.replace("/audio/speech", "/models")
-            url.endsWith("/models") -> url
-            url.endsWith("/v1") -> "$url/models"
-            else -> "$url/v1/models"
+            url.isBlank() -> "https://api.openai.com/v1/$subPath"
+            url.contains("/audio/speech") -> url.replace("/audio/speech", "/$subPath")
+            url.endsWith("/v1") -> "$url/$subPath"
+            else -> "$url/v1/$subPath"
         }
     }
 }

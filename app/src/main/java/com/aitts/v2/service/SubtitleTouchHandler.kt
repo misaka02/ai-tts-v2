@@ -48,7 +48,7 @@ internal object SubtitleTouchHandler {
             if (current.floatingSubtitleLockPosition) {
                 if (event.action == MotionEvent.ACTION_UP) {
                     expanded = !expanded
-                    textView.maxLines = if (expanded) 14 else current.floatingSubtitleMaxLines.coerceIn(1, 8)
+                    textView.maxLines = if (expanded) 12 else 3
                     onToggleExpand(expanded)
                 }
                 return@setOnTouchListener true
@@ -79,7 +79,7 @@ internal object SubtitleTouchHandler {
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
                         expanded = !expanded
-                        textView.maxLines = if (expanded) 14 else current.floatingSubtitleMaxLines.coerceIn(1, 8)
+                        textView.maxLines = if (expanded) 12 else 3
                         onToggleExpand(expanded)
                     } else {
                         onDragEnd(lp.y)

@@ -1,42 +1,34 @@
 package com.aitts.v2.engine.audio
 
-import com.aitts.v2.model.AudioProcessingMode
+import com.aitts.v2.engine.pipeline.AudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
-import kotlin.math.tanh
 
 /**
- * Stateful PCM16 post-processor:
- * - Preserves filter state across streaming chunks to prevent click artifacts.
- * - Guarantees bit-exact passthrough when mode is PASSTHROUGH, gain is 1.0f, and silence trim is off.
+ * Lossless-first PCM16 post-processor implementing [AudioProcessor].
+ * Guarantees bit-exact passthrough unless silence trimming or sleep-timer gain fade is active.
  */
-class AudioEnhancer {
+class AudioEnhancer : AudioProcessor {
 
-    private var prevLeft = 0.0f
-    private var prevRight = 0.0f
+    override fun process(
+        pcm16: ByteArray,
+        sampleRate: Int,
+        gain: Float,
+        trimSilence: Boolean
+    ): ByteArray = processPcm(pcm16, channels = 1, gain = gain, trimSilence = trimSilence)
 
     fun processPcm(
         pcmData: ByteArray,
         channels: Int = 1,
-        mode: AudioProcessingMode = AudioProcessingMode.PASSTHROUGH,
-        customClarity: Boolean = false,
-        customGain: Float = 1.0f,
+        gain: Float = 1.0f,
         trimSilence: Boolean = false
     ): ByteArray {
         if (pcmData.size < 2) return pcmData
 
         val activePcm = if (trimSilence) trimDeadAirSilence(pcmData, channels) else pcmData
-        val enableClarity = when (mode) {
-            AudioProcessingMode.CUSTOM -> customClarity
-            else -> mode.clarityBoost
-        }
-        val gain = when (mode) {
-            AudioProcessingMode.CUSTOM -> customGain
-            else -> mode.defaultGain
-        }.coerceIn(0.1f, 2.5f)
-
-        if (!enableClarity && kotlin.math.abs(gain - 1.0f) < 0.005f) {
+        val clampedGain = gain.coerceIn(0.05f, 2.0f)
+        if (abs(clampedGain - 1.0f) < 0.005f) {
             return activePcm
         }
 
@@ -46,27 +38,11 @@ class AudioEnhancer {
 
         val input = ByteBuffer.wrap(activePcm, 0, totalFrames * frameSize).order(ByteOrder.LITTLE_ENDIAN)
         val output = ByteBuffer.allocate(totalFrames * frameSize).order(ByteOrder.LITTLE_ENDIAN)
-        val alpha = 0.38f
-
-        for (i in 0 until totalFrames) {
-            val l = input.short.toFloat()
-            val fl = if (enableClarity) (l - alpha * prevLeft).also { prevLeft = l } else l
-            val compL = tanh((fl * gain / 32767.0f).toDouble()).toFloat() * 32767.0f
-            output.putShort(compL.toInt().coerceIn(-32768, 32767).toShort())
-
-            if (channels > 1) {
-                val r = input.short.toFloat()
-                val fr = if (enableClarity) (r - alpha * prevRight).also { prevRight = r } else r
-                val compR = tanh((fr * gain / 32767.0f).toDouble()).toFloat() * 32767.0f
-                output.putShort(compR.toInt().coerceIn(-32768, 32767).toShort())
-            }
+        for (i in 0 until totalFrames * channels) {
+            val scaled = (input.short * clampedGain).toInt().coerceIn(-32768, 32767).toShort()
+            output.putShort(scaled)
         }
         return output.array()
-    }
-
-    fun reset() {
-        prevLeft = 0.0f
-        prevRight = 0.0f
     }
 
     companion object {

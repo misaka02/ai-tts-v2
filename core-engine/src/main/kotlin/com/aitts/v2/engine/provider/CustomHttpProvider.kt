@@ -141,7 +141,6 @@ class CustomHttpProvider(
             .replace("\${prompt}", encodeVal(cfg.promptInstruction))
             .replace("\${speed}", cfg.speed.toString())
             .replace("\${pitch}", cfg.pitch.toString())
-            .replace("\${volume}", cfg.volume.toString())
             .replace("\${model}", encodeVal(cfg.modelName))
             .replace("\${voice}", encodeVal(cfg.voiceId))
             .replace("\${sample_rate}", cfg.sampleRate.toString())

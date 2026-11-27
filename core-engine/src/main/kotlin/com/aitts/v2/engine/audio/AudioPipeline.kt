@@ -1,6 +1,5 @@
 package com.aitts.v2.engine.audio
 
-import com.aitts.v2.model.AudioProcessingMode
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.ProviderCapabilities
 import com.aitts.v2.model.TtsProviderConfig
@@ -77,25 +76,10 @@ class AudioPipeline(
         } else {
             pcm24kMono
         }
-        val enhancer = AudioEnhancer()
-        val effectiveMode = if (kotlin.math.abs(effectiveGain - 1.0f) >= 0.02f &&
-            settings.audioProcessingMode == AudioProcessingMode.PASSTHROUGH
-        ) {
-            AudioProcessingMode.CUSTOM
-        } else {
-            settings.audioProcessingMode
-        }
-        val gain = if (effectiveMode == AudioProcessingMode.CUSTOM) {
-            (settings.loudnessGainFactor * effectiveGain).coerceIn(0.05f, 2.5f)
-        } else {
-            effectiveGain
-        }
-        return enhancer.processPcm(
+        return AudioEnhancer().processPcm(
             pcmData = scaled,
             channels = 1,
-            mode = effectiveMode,
-            customClarity = settings.voiceClarityBoostEnabled,
-            customGain = gain,
+            gain = effectiveGain,
             trimSilence = settings.trimDeadSilence
         )
     }

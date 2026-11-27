@@ -147,4 +147,135 @@ class CloudProvidersMockTest {
         assertTrue(res.isSuccess)
         assertArrayEquals(audioBytes, res.getOrThrow().bytes)
     }
+
+    @Test
+    fun `azure discovers styles from voices list and emits express-as ssml`() = runTest {
+        val voicesJson = """
+            [
+              {
+                "ShortName": "zh-CN-XiaoxiaoNeural",
+                "LocalName": "晓晓",
+                "Gender": "Female",
+                "Locale": "zh-CN",
+                "StyleList": ["cheerful", "sad"]
+              }
+            ]
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(voicesJson))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("mp3-bytes"))
+
+        val provider = AzureTtsProvider(httpManager)
+        val cfg = TtsProviderConfig(
+            id = "az",
+            type = ProviderType.AZURE,
+            name = "Azure",
+            baseUrl = server.url("/cognitiveservices/v1").toString(),
+            voiceId = "zh-CN-XiaoxiaoNeural",
+            extraParams = mapOf("style" to "cheerful", "styleDegree" to "1.5")
+        )
+        val creds = ProviderCredentials("azure-key")
+        val catalog = provider.discoverCatalog(cfg, creds)
+        assertTrue(catalog.fromRemote)
+        assertEquals(listOf("cheerful", "sad"), catalog.stylesByVoice["zh-CN-XiaoxiaoNeural"])
+
+        val res = provider.synthesize(ProviderSynthesisRequest("你好", cfg, creds))
+        assertTrue(res.isSuccess)
+        val listReq = server.takeRequest()
+        assertEquals("/cognitiveservices/voices/list", listReq.path)
+        val synthReq = server.takeRequest()
+        val ssmlBody = synthReq.body.readUtf8()
+        assertTrue(ssmlBody.contains("<mstts:express-as style='cheerful' styledegree='1.5'>"))
+    }
+
+    @Test
+    fun `minimax posts get_voice catalog and sends emotion inside voice_setting`() = runTest {
+        val getVoiceJson = """
+            {
+              "system_voice": [{"voice_id": "male-qn-qingse", "voice_name": "青涩青年"}],
+              "voice_cloning": [{"voice_id": "clone-1", "voice_name": "自建"}]
+            }
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(getVoiceJson))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"base_resp":{"status_code":0},"data":{"audio":"01020304"}}"""))
+
+        val provider = MiniMaxTtsProvider(httpManager)
+        val cfg = TtsProviderConfig(
+            id = "mm",
+            type = ProviderType.MINIMAX,
+            name = "MiniMax",
+            baseUrl = server.url("/v1/t2a_v2").toString(),
+            voiceId = "clone-1",
+            extraParams = mapOf("emotion" to "happy")
+        )
+        val creds = ProviderCredentials("mm-key")
+        val catalog = provider.discoverCatalog(cfg, creds)
+        assertTrue(catalog.fromRemote)
+        assertEquals(2, catalog.voices.size)
+        assertEquals("clone-1", catalog.voices.first().id)
+
+        val res = provider.synthesize(ProviderSynthesisRequest("测试", cfg, creds))
+        assertTrue(res.isSuccess)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), res.getOrThrow().bytes)
+        val discoveryReq = server.takeRequest()
+        assertEquals("POST", discoveryReq.method)
+        assertEquals("/v1/get_voice", discoveryReq.path)
+        val synthReq = server.takeRequest()
+        assertTrue(synthReq.body.readUtf8().contains("\"emotion\":\"happy\""))
+    }
+
+    @Test
+    fun `openai compatible discovers models and voices and sends instructions`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"data":[{"id":"gpt-4o-mini-tts"},{"id":"gpt-4o"}]}""")
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"result":[{"uri":"v1","customName":"Alex"}]}""")
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("mp3-data"))
+
+        val provider = OpenAiCompatibleProvider(httpManager)
+        val cfg = TtsProviderConfig(
+            id = "oai",
+            type = ProviderType.OPENAI_COMPATIBLE,
+            name = "OpenAI",
+            baseUrl = server.url("/v1/audio/speech").toString(),
+            modelName = "gpt-4o-mini-tts",
+            promptInstruction = "用温柔沉稳的旁白语气"
+        )
+        val creds = ProviderCredentials("oai-key")
+        val catalog = provider.discoverCatalog(cfg, creds)
+        assertTrue(catalog.fromRemote)
+        assertEquals(listOf("gpt-4o-mini-tts"), catalog.models)
+        assertEquals("v1", catalog.voices.first().id)
+
+        val res = provider.synthesize(ProviderSynthesisRequest("旁白测试", cfg, creds))
+        assertTrue(res.isSuccess)
+        assertEquals("/v1/models", server.takeRequest().path)
+        assertEquals("/v1/audio/voice/list", server.takeRequest().path)
+        val synthBody = server.takeRequest().body.readUtf8()
+        assertTrue(synthBody.contains("\"instructions\":\"用温柔沉稳的旁白语气\""))
+    }
+
+    @Test
+    fun `fish audio resolves dynamic non-hardcoded host for voice discovery`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"items":[{"_id":"fish-custom-1","title":"解说音色"}]}""")
+        )
+
+        val provider = FishAudioTtsProvider(httpManager)
+        val cfg = TtsProviderConfig(
+            id = "fish",
+            type = ProviderType.FISH_AUDIO,
+            name = "Fish",
+            baseUrl = server.url("/v1/tts").toString()
+        )
+        val catalog = provider.discoverCatalog(cfg, ProviderCredentials("fish-key"))
+        assertTrue(catalog.fromRemote)
+        assertEquals(listOf("fish-custom-1"), catalog.voices.map { it.id })
+        val req = server.takeRequest()
+        assertEquals("/model?page_size=30", req.path)
+    }
 }

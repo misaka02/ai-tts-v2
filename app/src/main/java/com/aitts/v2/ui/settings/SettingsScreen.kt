@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,6 +43,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
     val logSessions by viewModel.logSessionsFlow.collectAsStateWithLifecycle()
     val rawLogs by viewModel.rawLogsFlow.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
     val permState by viewModel.permissionState.collectAsStateWithLifecycle()
 
     var showProxyDialog by remember { mutableStateOf(false) }
@@ -50,9 +52,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
     var showLogsSheet by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        viewModel.refreshPermissions(context)
-    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshPermissions(context) }
 
     LaunchedEffect(Unit) {
         viewModel.refreshPermissions(context)
@@ -74,7 +74,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             Column {
                 Text("偏好与系统", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    "系统接入状态、分段策略、声学调音与主题备份",
+                    "系统接入自检、精简分段、声学参数与上游清单热更新",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -84,14 +84,16 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         item {
             SystemReadinessCard(
                 permState = permState,
+                isBusy = isBusy,
                 onOpenTts = { PermissionHelper.openSystemTtsSettings(context) },
                 onOpenBattery = { PermissionHelper.openIgnoreBatteryOptimizations(context) },
-                onOpenOverlay = { PermissionHelper.openOverlayPermission(context) }
+                onOpenOverlay = { PermissionHelper.openOverlayPermission(context) },
+                onRunSelfTest = { viewModel.runSystemTtsSelfTest(context) }
             )
         }
 
         item {
-            InkSectionHeader("通知与悬浮字幕")
+            InkSectionHeader("通知与极简悬浮字幕")
             SystemSubtitleSection(
                 settings = settings,
                 overlayGranted = permState.overlayGranted,
@@ -108,22 +110,19 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         }
 
         item {
-            InkSectionHeader("文本分段与预加载")
-            SegmentationSection(settings = settings, onUpdate = viewModel::updateSettings)
+            InkSectionHeader("智能分段、倍速与无损输出")
+            SegmentationAcousticsSection(settings = settings, onUpdate = viewModel::updateSettings)
         }
 
         item {
-            InkSectionHeader("声学调音与语义规整")
-            AcousticsSection(settings = settings, onUpdate = viewModel::updateSettings)
-        }
-
-        item {
-            InkSectionHeader("网络代理与容灾")
-            NetworkResilienceSection(
+            InkSectionHeader("网络、容灾与上游清单")
+            NetworkManifestSection(
                 settings = settings,
                 providers = providers,
+                isBusy = isBusy,
                 onUpdate = viewModel::updateSettings,
-                onOpenProxyDialog = { showProxyDialog = true }
+                onOpenProxyDialog = { showProxyDialog = true },
+                onSyncManifest = viewModel::syncRemoteManifest
             )
         }
 
@@ -159,12 +158,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         SubtitleCustomizerSheet(settings = settings, onUpdate = viewModel::updateSettings, onDismiss = { showSubtitleSheet = false })
     }
     if (showLogsSheet) {
-        LogViewerSheet(
-            sessions = logSessions,
-            rawLogs = rawLogs,
-            onClear = viewModel::clearLogs,
-            onDismiss = { showLogsSheet = false }
-        )
+        LogViewerSheet(sessions = logSessions, rawLogs = rawLogs, onClear = viewModel::clearLogs, onDismiss = { showLogsSheet = false })
     }
     if (showResetDialog) {
         ConfirmResetDialog(
@@ -177,31 +171,32 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
 @Composable
 private fun SystemReadinessCard(
     permState: AppPermissionState,
+    isBusy: Boolean,
     onOpenTts: () -> Unit,
     onOpenBattery: () -> Unit,
-    onOpenOverlay: () -> Unit
+    onOpenOverlay: () -> Unit,
+    onRunSelfTest: () -> Unit
 ) {
     InkPaperCard(padding = 14.dp) {
-        ReadinessRow(
-            title = "系统默认 TTS 引擎",
-            status = if (permState.isSystemDefaultTts) "已设为默认" else "点击前往切换",
-            ok = permState.isSystemDefaultTts,
-            onClick = onOpenTts
-        )
+        ReadinessRow("系统默认 TTS 引擎", if (permState.isSystemDefaultTts) "已设为默认" else "点击前往切换", permState.isSystemDefaultTts, onOpenTts)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ReadinessRow(
-            title = "后台电池白名单",
-            status = if (permState.ignoringBatteryOptimizations) "已放行" else "建议忽略优化",
-            ok = permState.ignoringBatteryOptimizations,
-            onClick = onOpenBattery
+            "后台电池白名单",
+            if (permState.ignoringBatteryOptimizations) "已放行" else "建议忽略优化",
+            permState.ignoringBatteryOptimizations,
+            onOpenBattery
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ReadinessRow(
-            title = "悬浮字幕权限",
-            status = if (permState.overlayGranted) "已授权" else "前往授权",
-            ok = permState.overlayGranted,
-            onClick = onOpenOverlay
+        ReadinessRow("悬浮字幕权限", if (permState.overlayGranted) "已授权" else "前往授权", permState.overlayGranted, onOpenOverlay)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+            "阅读器接入：在系统设置设为首选后，开源阅读 (Legado) / 静读天下选「系统 TTS」即可；外部分享或划词「AI 朗读」可直接起播。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        OutlinedButton(onClick = onRunSelfTest, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
+            Text(if (isBusy) "自检中..." else "系统 TTS 真链路自检")
+        }
     }
 }
 

@@ -11,13 +11,17 @@ import com.aitts.v2.data.SecretStore
 import com.aitts.v2.engine.audio.AudioPipeline
 import com.aitts.v2.engine.cache.AudioDiskCache
 import com.aitts.v2.engine.logging.EngineLogger
+import com.aitts.v2.engine.manifest.RemoteManifestRepository
 import com.aitts.v2.engine.network.HttpClientManager
 import com.aitts.v2.engine.offline.OfflineModelInstaller
+import com.aitts.v2.engine.provider.DiscoveryDiskCache
 import com.aitts.v2.engine.provider.TtsProviderRegistry
 import com.aitts.v2.engine.synthesis.SynthesisOrchestrator
 import com.aitts.v2.offline.PlatformOfflineBackend
 import com.aitts.v2.service.FloatingSubtitleOverlay
 import com.aitts.v2.service.SleepTimerController
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import java.io.File
 
 /**
@@ -34,7 +38,20 @@ class AppContainer(context: Context) {
     val backupManager = BackupManager(preferences, secretStore)
     val quoteRepository = QuoteRepository(httpManager)
 
+    private val incomingTextChannel = Channel<String>(capacity = 16)
+    val incomingTextEvents = incomingTextChannel.receiveAsFlow()
+
+    fun submitIncomingText(text: String) {
+        incomingTextChannel.trySend(text)
+    }
+
     val diskCache = AudioDiskCache(File(appContext.cacheDir, "tts_audio_cache_v2"))
+    val discoveryCache = DiscoveryDiskCache(File(appContext.cacheDir, "tts_discovery_cache"))
+    val manifestRepository = RemoteManifestRepository(
+        cacheFile = File(appContext.filesDir, "upstream_manifest.json"),
+        httpManager = httpManager
+    )
+
     val audioDecoder = AndroidAudioDecoder()
     val audioPipeline = AudioPipeline(audioDecoder)
     val previewPlayer = StreamingAudioTrackPlayer()
@@ -46,7 +63,8 @@ class AppContainer(context: Context) {
 
     val providerRegistry = TtsProviderRegistry(
         httpManager = httpManager,
-        offlineProvider = PlatformOfflineBackend.createProvider(appContext, modelInstaller)
+        offlineProvider = PlatformOfflineBackend.createProvider(appContext, modelInstaller),
+        gecVersionProvider = { manifestRepository.edgeGecVersion() }
     )
 
     val orchestrator = SynthesisOrchestrator(
@@ -63,10 +81,6 @@ class AppContainer(context: Context) {
         FloatingSubtitleOverlay(
             appContext = appContext,
             settingsProvider = { preferences.settingsFlow.value },
-            onPresetSelected = { preset ->
-                val cur = preferences.settingsFlow.value
-                preferences.updateSettings(cur.copy(floatingSubtitleNovelPreset = preset))
-            },
             onClosedByUser = {
                 val cur = preferences.settingsFlow.value
                 if (cur.isFloatingSubtitleEnabled) {

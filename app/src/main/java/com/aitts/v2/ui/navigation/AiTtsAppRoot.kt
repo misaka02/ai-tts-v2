@@ -27,6 +27,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -71,6 +72,17 @@ fun AiTtsAppRoot(container: AppContainer) {
     val providersVm: ProvidersViewModel = viewModel(factory = ProvidersViewModel.Factory(container))
     val rulesVm: RulesViewModel = viewModel(factory = RulesViewModel.Factory(container))
     val settingsVm: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(container))
+
+    LaunchedEffect(container) {
+        container.incomingTextEvents.collect { sharedText ->
+            navController.navigate(TabRoute.Hub.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+            hubVm.speakExternalText(sharedText)
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

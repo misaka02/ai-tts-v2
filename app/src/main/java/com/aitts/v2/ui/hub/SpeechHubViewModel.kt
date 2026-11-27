@@ -12,7 +12,6 @@ import com.aitts.v2.engine.synthesis.SynthesisSink
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.LogEntry
 import com.aitts.v2.model.RequestLogSession
-import com.aitts.v2.model.SpeechHistoryItem
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.permission.AppPermissionState
 import com.aitts.v2.permission.PermissionHelper
@@ -67,7 +66,6 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), container.preferences.getActiveProvider())
 
     val rmsFlow: StateFlow<Float> = container.previewPlayer.rmsFlow
-    val historyFlow: StateFlow<List<SpeechHistoryItem>> = container.preferences.historyFlow
     val sleepActiveFlow: StateFlow<Boolean> = container.sleepTimer.isActiveFlow
     val sleepRemainingFlow: StateFlow<Int> = container.sleepTimer.remainingSecondsFlow
 
@@ -90,16 +88,20 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun speakExternalText(sharedText: String) {
+        val clean = sharedText.trim()
+        if (clean.isEmpty()) return
+        stopPreview()
+        _uiState.update { it.copy(inputText = clean, quoteSource = "外部传入文本") }
+        togglePlayPreview()
+    }
+
     fun refreshPermissions(context: Context) {
         _uiState.update { it.copy(permissionState = PermissionHelper.check(context)) }
     }
 
     fun updateInputText(text: String) {
         _uiState.update { it.copy(inputText = text) }
-    }
-
-    fun loadHistoryItem(item: SpeechHistoryItem) {
-        _uiState.update { it.copy(inputText = item.text, quoteSource = "历史记录 · ${item.providerName}") }
     }
 
     fun consumeStatusMessage() {
@@ -204,8 +206,7 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
             allProviders = container.preferences.providersFlow.value,
             rules = container.preferences.rulesFlow.value,
             credentialsLookup = { id -> container.preferences.getCredentials(id) },
-            fadeGainProvider = { container.sleepTimer.getFadeVolumeFactor() },
-            onHistoryRecorded = { item -> container.preferences.recordSpeechHistory(item) }
+            fadeGainProvider = { container.sleepTimer.getFadeVolumeFactor() }
         )
     }
 
@@ -291,7 +292,7 @@ class SpeechHubViewModel(private val container: AppContainer) : ViewModel() {
     fun setSleepTimer(minutes: Int) {
         if (minutes <= 0) container.sleepTimer.stop() else container.sleepTimer.start(minutes)
     }
-    fun clearHistory() = container.preferences.clearHistory()
+
     fun clearLogs() = container.logger.clear()
 
     override fun onCleared() {
