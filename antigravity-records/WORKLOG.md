@@ -94,3 +94,7 @@
    - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 2m 1s`，`27/27` 单元测试全部通过：`:core-model:test` `5`、`:core-engine:test` `20`、`:app:testCloudDebugUnitTest` `2`）。
    - `app/build/outputs/apk/cloud/release/app-cloud-release.apk`：`1,827,949` 字节（约 `1.74 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。
    - `app/build/outputs/apk/full/release/app-full-release.apk`：`25,502,031` 字节（约 `24.32 MiB`），`apksigner.bat` 校验通过（退出码 `0`）。
+5. **Pre-release 自动发布规则持久化与 `v2.1.0-pre.1` 发布**：
+   - 将「每次完成 Android 编译验收后默认发布 GitHub Pre-release（仅明确要求时才发正式版）」写入全局 `GEMINI.md` 与两份 `AGENTS.md`。
+   - 更新 [.github/workflows/ci.yml](../.github/workflows/ci.yml) 支持连字符预发布标签自动标记 `prerelease: true`。
+   - 推送标签 `v2.1.0-pre.1` 并发布 GitHub Pre-release：`https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1`（`isPrerelease: true`，附带 `ai-tts-v2-cloud-v2.1.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.1.0-pre.1.apk`）。

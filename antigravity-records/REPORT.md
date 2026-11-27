@@ -3,8 +3,8 @@
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
 - **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
-- **GitHub Release**：`https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0`（v2.0.0 首版附件）；当前 `main` 已升级为「纸墨听书」UI 与全功能修复版。
-- **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包”规则。
+- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；最新预发布 [v2.1.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.1.0-pre.1)（Pre-release，含「纸墨听书」UI 重设计 & 功能全修复版 `ai-tts-v2-cloud-v2.1.0-pre.1.apk` 与 `ai-tts-v2-full-arm64-v2.1.0-pre.1.apk`）。
+- **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包 + 默认发布 GitHub Pre-release”规则。
 - **当前最新验证与产物（2026-11-27 纸墨重设计版）**：
   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）
   - `.\gradlew.bat detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 2m 1s`，`27/27` 单测通过，`Detekt` 0 issues，`Lint` 0 errors）
