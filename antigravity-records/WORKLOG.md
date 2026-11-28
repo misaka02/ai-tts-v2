@@ -343,3 +343,41 @@
      - `antigravity-records/screenshots/v2.6.0-pre.1/05_reader_layout_overlay_clean.png`（开启「阅读与排版设置」自动隐藏上下控制栏、正文稳定无抽搐）
      - `antigravity-records/screenshots/v2.6.0-pre.1/06_gdrive_auth_card_v26.png`（重设计 Google 网盘连接卡：SAF 主按钮置顶、`JSON / rclone` 导入与 Custom Tabs 浏览器登录入口）
    - 清理旧预发布 `v2.5.0-pre.1`，发布唯一最新预发布 **`v2.6.0-pre.1`** 随附双 R8 签名 APK。
+
+---
+
+## 15. v2.7.0-pre.1 听书分块策略/智能注音/跨章预解码无缝播报与 Google 网盘 OAuth/Play 授权深化修复
+
+围绕第 2 轮听书核心能力（文本分块控制、轻小说 `<ruby>` 符号注音智能提取、24kHz PCM 后台预解码、单 `AudioTrack` 跨章无缝衔接、逐块热切音色与 EPUB 对齐）及上一轮 Google Drive OAuth/Play 授权体验进一步加固，完成工程实现、全门禁校验与两轮 Qodo 审查闭环（修改 25 个既有文件 + 新增 5 个源码/单测文件，净变更 25 modified + 5 added）：
+
+1. **Google Drive OAuth 并发稳定性、Play 直登主入口与深链回跳（`:core-engine` & `:app`）**：
+   - [GoogleOAuthClientJsonParser.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleOAuthClientJsonParser.kt) + [GoogleOAuthClientJsonParserTest.kt](../core-engine/src/test/kotlin/com/aitts/v2/engine/cloud/GoogleOAuthClientJsonParserTest.kt)：新增 `loopbackRedirectUri`，支持含 `http://127.0.0.1:<port>` 或 `http://localhost:<port>` 的 `web` OAuth JSON。
+   - [AndroidManifest.xml](../app/src/main/AndroidManifest.xml) & [MainActivity.kt](../app/src/main/java/com/aitts/v2/ui/MainActivity.kt)：新增 `aitts://oauth-done` 回调深链并在 `extractIncomingBookUri` 过滤 `aitts://` 防止误触发电子书导入。
+   - [GoogleDriveLoopbackAuth.kt](../app/src/main/java/com/aitts/v2/reader/GoogleDriveLoopbackAuth.kt)：改为 `backlog = 16` + 有界线程池 `ThreadPoolExecutor(4, 8, 5s, ArrayBlockingQueue(8))` 防止 Chrome 预连接或空连接堵塞回调，支持无路径回环 URI 原样匹配、成功页自动 `aitts://oauth-done` 回跳及裸授权码 `code` 手动粘贴完成；[GoogleDriveRepository.kt](../app/src/main/java/com/aitts/v2/reader/GoogleDriveRepository.kt) 持久化 `(clientId, clientSecret, redirectUri)` 草稿。
+   - 拆分 [CloudAuthDiagnostics.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudAuthDiagnostics.kt) 与 [GoogleDriveAuthComponents.kt](../app/src/main/java/com/aitts/v2/ui/reader/GoogleDriveAuthComponents.kt)，精简 [CloudAuthCoordinator.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudAuthCoordinator.kt)、[CloudFileManagerSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerSheets.kt)、[CloudFileManagerViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerViewModel.kt) 与 [CloudFileManagerScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerScreen.kt)：将「Google Play 一键直接登录」与「系统网盘直选 (SAF)」并列置顶、内联包名 `com.aitts.engine` 与 `SHA-1` 一键复制、支持直接粘贴 JSON/`rclone.conf`/`token.json` 文本、外部浏览器备选通道、4 步测试用户指引、`Refresh Token` 接入窗及 OAuth `403/redirect_uri_mismatch/client_secret/invalid_grant` 精确诊断。
+
+2. **听书分块策略、轻小说 `<ruby>` 注音替换与 24kHz PCM 跨章无缝预加载（`:core-reader`, `:core-engine` & `:app`）**：
+   - [ReaderSettings.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderSettings.kt) & [ReaderSettingsCompatibilityTest.kt](../core-reader/src/test/kotlin/com/aitts/v2/reader/ReaderSettingsCompatibilityTest.kt)：新增 `ReaderTtsChunkMode`（`SMART_MERGE` / `BY_PARAGRAPH` / `BY_SENTENCE`）、`ttsTargetChunkChars`（`80..600`，默认 `220`）、`ttsPreloadCount`（`1..4`，默认 `2`）与 `ttsSmartRubyReading`（默认 `true`），向后兼容旧 JSON。
+   - [EpubHtmlParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubHtmlParser.kt)、[EpubBookParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubBookParser.kt) 与 [EpubHtmlParserTest.kt](../core-reader/src/test/kotlin/com/aitts/v2/reader/EpubHtmlParserTest.kt)：当 `<ruby>` 基座仅含 `◎×〼` 等非可读字形时自动抽取 `<rt>` 朗读、保留常规汉字注音不重复、并在 `stripNoterefMarkers = true`（仅 EPUB 通道，不影响 `HtmlBookParser`）时剔除内联 `㊟` 等注脚锚符号。
+   - [SynthesisOrchestrator.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/synthesis/SynthesisOrchestrator.kt) & [SynthesisOrchestratorTest.kt](../core-engine/src/test/kotlin/com/aitts/v2/engine/synthesis/SynthesisOrchestratorTest.kt)：预取缓存升级为后台预解码 24kHz 单声道 PCM16（窗口延展至 `1..4`），对外开放 `synthesizeSegmentPcm` 与 `streamSegmentToSink` 复用重试、缓存与降级通路；[StreamingAudioTrackPlayer.kt](../app/src/main/java/com/aitts/v2/audio/StreamingAudioTrackPlayer.kt) 新增 `ensureStreamOpen` 保持单 `AudioTrack` 跨章不断流。
+   - 新增 [ReaderTtsChunker.kt](../app/src/main/java/com/aitts/v2/reader/ReaderTtsChunker.kt)（含 `BookTtsChunk.endBlockIndex` 与双 Key `rotateCredentials`）及 [ReaderTtsChunkerTest.kt](../app/src/test/kotlin/com/aitts/v2/reader/ReaderTtsChunkerTest.kt)，重构 [ReaderTtsController.kt](../app/src/main/java/com/aitts/v2/reader/ReaderTtsController.kt) 为跨章滑窗 PCM 预取队列（支持播放中热切引擎/语速/分块模式并丢弃旧预取），并在 [ReaderTtsSheet.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderTtsSheet.kt) 落地完整调节面板。
+
+3. **EPUB TTS `href` 精确对齐、顺序高亮防回跳与精确匹配优先修复（`:app`）**：
+   - [ReadiumEngine.kt](../app/src/main/java/com/aitts/v2/reader/ReadiumEngine.kt) 与 [ReaderAnnotationHelper.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderAnnotationHelper.kt)：`readResourceBytes` 与 `openFootnote` 改为精确规范化路径优先匹配（消除 Qodo 上轮提示 `3897d404` 同后缀文件名冲突），并新增 `locatorFromHref` 防止含 `nav.xhtml` 时章节索引偏移。
+   - [ReaderTtsSearchHelper.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderTtsSearchHelper.kt)、[ReaderViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderViewModel.kt)、[ReadiumEpubViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumEpubViewport.kt) 与 [ReaderScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderScreen.kt)：按 `href` 对齐章节起读与跨章跳转，并以章节进度递进匹配结合停止复位防重复短句高亮倒退。
+
+4. **Qodo CLI 两轮审查与最终全量门禁复验（已达 2 轮止损上限）**：
+   - **Qodo 第 1 轮**（`operation_id: e2939112-eedf-4b81-9a22-7862076c2ad5`，`meta.run.id: e9133a125a904d1bb6ec34cdd636bcf6`）：`complete = True`，`0` 项 `action_required`，检出 6 项 `remediation_recommended`（`f6a7894c` Play 启动失败 `isBusy` 未复位、`50bd993d` 并发取消清空新会话 `activeExpectedState`、`046e488a` `configFingerprint` 漏计模型/端点、`59589e19` 短句合并、`14f9b76a` 首章未尊重 `ttsSmartRubyReading`、`7728c64a` 播放中改分块未重建余下队列），当轮全部修复。
+   - **Qodo 第 2 轮**（`operation_id: 831de2ae-53ef-4fc4-bf77-94a37608536c`，`meta.run.id: 8438116f74174e1fadc4ce7c347cf60f`，达 2 轮上限）：确认第 1 轮全部 6 项均为 **`resolved`**；新检出 1 项 `action_required`（`733f19c4` 智能合并块中途改分块按首块索引重建导致重复朗读已并入段落）与 5 项 `remediation_recommended`（`4e540e1f` 备选 Key 轮换、`84a1527f` 无路径 Web 回调 URI、`16600f2a` 回环有界队列、`674189fe` 停播复位高亮进度、`c7a60c8d` 保留 HTML 可见注脚标记），已一次性批量修复并补充对应单测验证，严格遵循 2 轮上限不再发起第 3 轮。
+
+5. **最终全量门禁、R8 签名产物体积/哈希与 `pixel_34` 实机验收**：
+   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`；全仓 `src/` 含单测共 `175` 个 `.kt` 文件 / `28,364` 行，所有 `src/main/*.kt <= 350` 行）。
+   - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`（全部 R2 修复完成后由 `flash` 子代理执行）：`BUILD SUCCESSFUL in 3m 47s`（退出码 `0`，`0` Kotlin/Java 编译警告与错误），`Detekt`、`Lint` 全部通过，**69/69 单元测试通过**（`:app:testCloudDebugUnitTest` `7`、`:core-engine:test` `40`、`:core-model:test` `6`、`:core-reader:test` `16`；0 跳过、0 失败、0 错误）。
+   - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk)（交付件 `ai-tts-v2-v2.7.0-pre.1-cloud-r8-signed.apk`）— **`6,615,776`** 字节（SHA-256 `CDEF850B37E8313EB9A4FE348B61408980EAC2B32B8477245A87B3153F9987EA`），`apksigner verify --print-certs` 退出码 `0`。
+   - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk)（交付件 `ai-tts-v2-v2.7.0-pre.1-full-r8-signed.apk`）— **`30,306,782`** 字节（SHA-256 `C448BBE0431D84E8630FBEFA7F5BE1E1A88226C7816EBA05903ABC2B4F13161E`），`apksigner verify --print-certs` 退出码 `0`。
+   - **Android `pixel_34` 实机模拟器验收截图（4 张已人工核验，`logcat -d *:E` 0 应用/Readium 崩溃；注：UI 截图于第 2 轮后端修复前同构 UI 抓拍，R2 修复未改动界面并已由 69/69 单测与 `qualityGate assembleR8Release` 全量复验）**：
+     - `antigravity-records/screenshots/v2.7.0-pre.1/01_gdrive_auth_v27_redesigned.png`（置顶 Play 直登与 SAF 主入口、内联包名/SHA-1 一键复制及多通道授权卡）
+     - `antigravity-records/screenshots/v2.7.0-pre.1/02_gdrive_guide_and_paste.png`（展开 4 步测试用户引导与 `Client Secret (必填)` / `固定回调 URI` 输入栏）
+     - `antigravity-records/screenshots/v2.7.0-pre.1/03_reader_tts_chunking_sheet.png`（《创约 11》听书控制台：3 种分块模式、`220 字` 目标滑块、`1..4 块` 预加载深度及轻小说注音智能朗读开关）
+     - `antigravity-records/screenshots/v2.7.0-pre.1/04_reader_tts_active_chuangyue11.png`（《创约 11》第一章触发听书后 Readium 章节首块蓝灰高亮与 `准备朗读` 状态）
+   - 清理旧预发布 `v2.6.0-pre.1`，发布唯一最新预发布 **`v2.7.0-pre.1`** 随附双 R8 签名 APK。

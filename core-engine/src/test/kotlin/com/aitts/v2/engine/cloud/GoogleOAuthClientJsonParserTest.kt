@@ -49,18 +49,37 @@ class GoogleOAuthClientJsonParserTest {
     }
 
     @Test
-    fun `rejects web OAuth json incompatible with loopback PKCE`() {
+    fun `parses web OAuth json when valid loopback redirect uri is configured`() {
+        val raw = """
+            {
+              "web": {
+                "client_id": "88888-web.apps.googleusercontent.com",
+                "client_secret": "GOCSPX-websec",
+                "redirect_uris": ["https://example.com/auth", "http://127.0.0.1:53682/callback"]
+              }
+            }
+        """.trimIndent()
+        val parsed = GoogleOAuthClientJsonParser.parse(raw).getOrThrow()
+        assertEquals("web", parsed.clientType)
+        assertEquals("88888-web.apps.googleusercontent.com", parsed.clientId)
+        assertEquals("GOCSPX-websec", parsed.clientSecret)
+        assertEquals("http://127.0.0.1:53682/callback", parsed.loopbackRedirectUri)
+    }
+
+    @Test
+    fun `rejects web OAuth json without loopback redirect uri`() {
         val raw = """
             {
               "web": {
                 "client_id": "99999-xyz.apps.googleusercontent.com",
-                "redirect_uris": ["https://example.com/callback"]
+                "redirect_uris": ["https://example.com/callback", "http://127.0.0.1:99999/bad"]
               }
             }
         """.trimIndent()
         val res = GoogleOAuthClientJsonParser.parse(raw)
         assertTrue(res.isFailure)
-        assertTrue(res.exceptionOrNull()?.message.orEmpty().contains("桌面应用"))
+        val msg = res.exceptionOrNull()?.message.orEmpty()
+        assertTrue(msg.contains("桌面应用") && msg.contains("53682"))
     }
 
     @Test

@@ -48,11 +48,14 @@ data class CloudFileManagerUiState(
     val webDavEndpoint: String = "",
     val dedicatedDirLabel: String = "",
     val showDevAuthSheet: Boolean = false,
+    val showPasteCredsSheet: Boolean = false,
     val isBrowserAuthWaiting: Boolean = false,
     val pendingAuthUrl: String = "",
     val pastedCallbackUrl: String = "",
     val devClientId: String = com.aitts.v2.BuildConfig.GDRIVE_DEFAULT_CLIENT_ID,
     val devClientSecret: String = "",
+    val devRedirectUri: String = "",
+    val devRefreshToken: String = "",
     val devAccessToken: String = "",
     val webDavUrlInput: String = "",
     val webDavUserInput: String = "",
@@ -69,12 +72,13 @@ class CloudFileManagerViewModel(private val container: AppContainer) : ViewModel
     private var listJob: Job? = null
 
     init {
-        val (draftId, draftSec) = container.googleDrive.loadDraftClientCredentials()
-        if (draftId.isNotBlank() || draftSec.isNotBlank()) {
+        val (draftId, draftSec, draftRedir) = container.googleDrive.loadDraftClientCredentials()
+        if (draftId.isNotBlank() || draftSec.isNotBlank() || draftRedir.isNotBlank()) {
             _uiState.update {
                 it.copy(
                     devClientId = draftId.ifBlank { it.devClientId },
-                    devClientSecret = draftSec
+                    devClientSecret = draftSec,
+                    devRedirectUri = draftRedir
                 )
             }
         }

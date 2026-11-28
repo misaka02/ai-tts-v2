@@ -141,7 +141,7 @@ fun ReaderScreen(
                         totalProgression = state.currentProgression,
                         showChrome = state.showChrome,
                         isTtsActive = activeTtsForBook,
-                        activeTtsSentence = if (activeTtsForBook) ttsState.activeSentenceText else "",
+                        activeTtsSentence = if (activeTtsForBook) ttsState.highlightAnchor.ifBlank { ttsState.activeSentenceText } else "",
                         autoScrollActive = state.autoScrollActive,
                         autoScrollPaused = state.autoScrollPaused,
                         pageTurnEvents = pageTurnEvents,

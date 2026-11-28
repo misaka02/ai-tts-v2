@@ -96,8 +96,8 @@ class SynthesisOrchestrator(
             val trace = "引擎=${baseCfg.name} 语速=${"%.2f".format(baseCfg.speed)}(sys=${"%.2f".format(input.systemSpeed)})"
             logger.info("TTS_SVC", "开始合成 (${segments.size} 段)", trace, sessionId = sessionId)
 
-            val prefetchCache = ConcurrentHashMap<Int, Deferred<Result<SynthesizedAudio>>>()
-            val windowSize = if (segments.size > 1) input.settings.preloadAheadCount.coerceIn(1, 3) else 1
+            val prefetchCache = ConcurrentHashMap<Int, Deferred<Result<ByteArray>>>()
+            val windowSize = if (segments.size > 1) input.settings.preloadAheadCount.coerceIn(1, 4) else 1
             val activeCreds = input.credentialsLookup(baseCfg.id)
             val streamFirst = baseCfg.isStreamingEnabled && registry.get(baseCfg.type).capabilities.supportsNativePcmStreaming
 
@@ -122,12 +122,13 @@ class SynthesisOrchestrator(
                 val useStream = baseCfg.isStreamingEnabled && cap.supportsNativePcmStreaming && !prefetchCache.containsKey(i)
 
                 if (useStream) {
-                    streamOrFallback(seg, baseCfg, segCreds, input, gain, sessionId, sink)
+                    streamSegmentToSink(seg, baseCfg, segCreds, input, gain, sessionId, sink)
                 } else {
-                    val audio = (prefetchCache.remove(i) ?: async {
-                        fetchBatch(seg.text, baseCfg, segCreds, input, sessionId)
+                    val decodedPcm = (prefetchCache.remove(i) ?: async {
+                        synthesizeSegmentPcm(seg.text, baseCfg, segCreds, input, sessionId, targetRate)
                     }).await().getOrElse { throw it }
-                    pushBatch(audio, baseCfg, input.settings, gain, targetRate, sink)
+                    val gained = SynthesisHelpers.processChunkGain(AudioEnhancer(), decodedPcm, gain)
+                    SynthesisHelpers.emitInChunks(gained, sink)
                 }
 
                 if (input.settings.sentencePauseMs > 0 && i < segments.size - 1) {
@@ -148,16 +149,22 @@ class SynthesisOrchestrator(
         }
     }
 
-    private suspend fun streamOrFallback(
+    suspend fun streamSegmentToSink(
         seg: SentenceSegment,
-        segCfg: TtsProviderConfig,
-        segCreds: ProviderCredentials,
+        activeConfig: TtsProviderConfig,
+        creds: ProviderCredentials,
         input: SynthesisInput,
         gain: Float,
         sessionId: String,
         sink: SynthesisSink
     ) {
+        val segCfg = SynthesisHelpers.resolveSpeedAndPitch(activeConfig, input)
         val provider = registry.get(segCfg.type)
+        if (!segCfg.isStreamingEnabled || !provider.capabilities.supportsNativePcmStreaming) {
+            val pcm = synthesizeSegmentPcm(seg.text, activeConfig, creds, input, sessionId, 24000).getOrThrow()
+            SynthesisHelpers.emitInChunks(SynthesisHelpers.processChunkGain(AudioEnhancer(), pcm, gain), sink)
+            return
+        }
         if (input.settings.isAudioCacheEnabled) {
             diskCache.get(segCfg, seg.text)?.let { cached ->
                 pushBatch(SynthesizedAudio(cached, segCfg.sampleRate, isRawPcm = false), segCfg, input.settings, gain, 24000, sink)
@@ -174,7 +181,7 @@ class SynthesisOrchestrator(
         }
         var emitted = false
 
-        val streamRes = provider.synthesizeStream(ProviderSynthesisRequest(seg.text, segCfg, segCreds, sessionId)) { chunk ->
+        val streamRes = provider.synthesizeStream(ProviderSynthesisRequest(seg.text, segCfg, creds, sessionId)) { chunk ->
             currentCoroutineContext().ensureActive()
             val resampled = PcmResampler.resample(chunk.pcm16Bytes, chunk.sampleRate, 1, 24000, 1)
             val scaled = scaler?.processChunk(resampled) ?: resampled
@@ -203,8 +210,23 @@ class SynthesisOrchestrator(
         if (emitted) throw streamRes.exceptionOrNull() ?: IOException("流式传输中断")
 
         logger.warn("STREAM", "首包未到达即失败，回退批处理", streamRes.exceptionOrNull()?.message, sessionId = sessionId)
-        val fallback = fetchBatch(seg.text, segCfg, segCreds, input, sessionId).getOrThrow()
-        pushBatch(fallback, segCfg, input.settings, gain, 24000, sink)
+        val pcm = synthesizeSegmentPcm(seg.text, activeConfig, creds, input, sessionId, 24000).getOrThrow()
+        SynthesisHelpers.emitInChunks(SynthesisHelpers.processChunkGain(enhancer, pcm, gain), sink)
+    }
+
+    suspend fun synthesizeSegmentPcm(
+        text: String,
+        activeConfig: TtsProviderConfig,
+        creds: ProviderCredentials,
+        input: SynthesisInput,
+        sessionId: String,
+        targetRate: Int = 24000
+    ): Result<ByteArray> = runCatching {
+        val cfg = SynthesisHelpers.resolveSpeedAndPitch(activeConfig, input)
+        val audio = fetchBatch(text, cfg, creds, input, sessionId).getOrThrow()
+        val pcm24k = audioPipeline.decodeToStandardPcm(audio.bytes, audio.sampleRate, targetRate).getOrThrow()
+        val cap = registry.get(cfg.type).capabilities
+        audioPipeline.applyBatchPostProcessing(pcm24k, cfg, cap, input.settings, 1.0f)
     }
 
     private suspend fun fetchBatch(
@@ -272,13 +294,13 @@ class SynthesisOrchestrator(
         activeCreds: ProviderCredentials,
         input: SynthesisInput,
         sessionId: String,
-        cache: ConcurrentHashMap<Int, Deferred<Result<SynthesizedAudio>>>
+        cache: ConcurrentHashMap<Int, Deferred<Result<ByteArray>>>
     ) {
         for (idx in indices) {
             if (idx !in segments.indices || cache.containsKey(idx)) continue
             val seg = segments[idx]
             val segCreds = SynthesisHelpers.rotateCredentials(activeCreds, idx)
-            cache[idx] = scope.async { fetchBatch(seg.text, baseCfg, segCreds, input, sessionId) }
+            cache[idx] = scope.async { synthesizeSegmentPcm(seg.text, baseCfg, segCreds, input, sessionId, 24000) }
         }
     }
 }

@@ -157,6 +157,7 @@ fun CloudFileManagerScreen(
                             GoogleDriveAuthCard(
                                 clientId = state.devClientId,
                                 clientSecret = state.devClientSecret,
+                                redirectUri = state.devRedirectUri,
                                 errorMessage = state.errorMessage,
                                 isBusy = state.isBusy,
                                 isBrowserWaiting = state.isBrowserAuthWaiting,
@@ -164,11 +165,17 @@ fun CloudFileManagerScreen(
                                 pastedCallbackUrl = state.pastedCallbackUrl,
                                 packageName = pkgName,
                                 signingSha1 = sha1,
-                                onUpdateClient = { id, sec -> viewModel.auth.updateDevInputs(cid = id, sec = sec) },
+                                onUpdateClient = { id, sec, redir ->
+                                    viewModel.auth.updateDevInputs(cid = id, sec = sec, redir = redir)
+                                },
                                 onUpdatePastedUrl = { pasted -> viewModel.auth.updateDevInputs(pastedUrl = pasted) },
                                 onImportJson = { jsonPicker.launch(arrayOf("*/*")) },
-                                onOpenCloudConsole = { viewModel.auth.openGoogleCloudConsole(context) },
-                                onBrowserSignIn = { viewModel.auth.startBrowserPkceGoogleAuth(context) },
+                                onOpenPasteDialog = { viewModel.auth.setDevAuthSheet(showPaste = true) },
+                                onOpenCloudConsole = {
+                                    viewModel.auth.openExternalUrl(context, "https://console.cloud.google.com/apis/credentials")
+                                },
+                                onBrowserSignIn = { ext -> viewModel.auth.startBrowserPkceGoogleAuth(context, ext) },
+                                onReopenExternalBrowser = { viewModel.auth.reopenPendingAuthInExternalBrowser(context) },
                                 onCopyAuthUrl = { viewModel.auth.copyPendingAuthUrl(context) },
                                 onSubmitManualCallback = viewModel.auth::submitManualCallbackUrl,
                                 onCancelBrowserSignIn = viewModel.auth::cancelBrowserPkceAuth,
@@ -179,7 +186,7 @@ fun CloudFileManagerScreen(
                                 },
                                 onCopySigningInfo = { viewModel.auth.copyPackageAndSha1(context) },
                                 onOpenSafPicker = { safMultiPicker.launch(arrayOf("*/*")) },
-                                onOpenDevTokenSheet = { viewModel.auth.setDevAuthSheet(true) }
+                                onOpenDevTokenSheet = { viewModel.auth.setDevAuthSheet(showDev = true) }
                             )
                         } else {
                             CloudConnectedBar(
@@ -315,9 +322,22 @@ fun CloudFileManagerScreen(
     }
     if (state.showDevAuthSheet) {
         DevTokenConnectDialog(
-            state.devAccessToken,
-            { viewModel.auth.updateDevInputs(tok = it) },
-            viewModel.auth::connectGoogleViaToken
-        ) { viewModel.auth.setDevAuthSheet(false) }
+            clientId = state.devClientId,
+            clientSecret = state.devClientSecret,
+            refreshToken = state.devRefreshToken,
+            accessToken = state.devAccessToken,
+            onUpdate = { cid, sec, ref, acc ->
+                viewModel.auth.updateDevInputs(cid = cid, sec = sec, ref = ref, tok = acc)
+            },
+            onOpenPlayground = { viewModel.auth.openExternalUrl(context, "https://developers.google.com/oauthplayground") },
+            onConnect = viewModel.auth::connectGoogleViaToken,
+            onDismiss = { viewModel.auth.setDevAuthSheet(showDev = false) }
+        )
+    }
+    if (state.showPasteCredsSheet) {
+        PasteCredentialsDialog(
+            onImportText = viewModel.auth::importCredentialsFromText,
+            onDismiss = { viewModel.auth.setDevAuthSheet(showPaste = false) }
+        )
     }
 }

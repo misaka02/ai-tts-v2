@@ -11,6 +11,7 @@ import com.aitts.v2.reader.model.ReaderScriptConvert
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.model.ReaderTapZoneMode
 import com.aitts.v2.reader.model.ReaderTextAlign
+import com.aitts.v2.reader.model.ReaderTtsChunkMode
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -40,6 +41,10 @@ class ReaderSettingsCompatibilityTest {
         assertTrue(decoded.publisherStyles)
         assertTrue(decoded.showHeaderBar)
         assertTrue(decoded.showFooterBar)
+        assertEquals(ReaderTtsChunkMode.SMART_MERGE, decoded.ttsChunkMode)
+        assertEquals(220, decoded.ttsTargetChunkChars)
+        assertEquals(2, decoded.ttsPreloadCount)
+        assertTrue(decoded.ttsSmartRubyReading)
     }
 
     @Test
@@ -80,7 +85,11 @@ class ReaderSettingsCompatibilityTest {
             scriptConvert = ReaderScriptConvert.TO_SIMPLIFIED,
             pageAnimation = ReaderPageAnimation.NONE,
             leftEdgeBrightnessGesture = false,
-            autoScrollSpeed = 7
+            autoScrollSpeed = 7,
+            ttsChunkMode = ReaderTtsChunkMode.BY_PARAGRAPH,
+            ttsTargetChunkChars = 340,
+            ttsPreloadCount = 3,
+            ttsSmartRubyReading = false
         )
         val encoded = json.encodeToString(full)
         val restored = json.decodeFromString<ReaderSettings>(encoded)

@@ -108,6 +108,8 @@ fun ReadiumEpubViewport(
     var latestLocator by remember(bookId, publication) { mutableStateOf(initialLocator) }
     var currentHref by remember(bookId, publication) { mutableStateOf("") }
     var lastSubmittedPrefs by remember(bookId, publication) { mutableStateOf<EpubPreferences?>(null) }
+    var lastTtsChapIdx by remember(bookId, publication) { mutableStateOf(-1) }
+    var lastTtsProg by remember(bookId, publication) { mutableStateOf(0.0) }
 
     var debouncedSettings by remember { mutableStateOf(readerSettings) }
     LaunchedEffect(readerSettings) { delay(90L); debouncedSettings = readerSettings }
@@ -259,16 +261,29 @@ fun ReadiumEpubViewport(
         nav.applyDecorations(decorations, group = "user-highlights")
     }
 
+    LaunchedEffect(isTtsActive) {
+        if (!isTtsActive) {
+            lastTtsChapIdx = -1
+            lastTtsProg = 0.0
+        }
+    }
+
     LaunchedEffect(navigatorRef, activeTtsSentence, readerSettings.autoScrollOnTts) {
         val nav = navigatorRef ?: return@LaunchedEffect
-        val snippet = activeTtsSentence.trim().take(36)
-        if (snippet.isBlank()) { nav.applyDecorations(emptyList(), group = "tts-active"); return@LaunchedEffect }
-        val hits = readiumEngine.searchPublication(publication, snippet, maxResults = 3)
+        val snippet = activeTtsSentence.replace(Regex("^[\\s「」『』“”\"…—]+"), "").trim().take(36)
+        if (snippet.length < 4) { nav.applyDecorations(emptyList(), group = "tts-active"); return@LaunchedEffect }
+        val hits = readiumEngine.searchPublication(publication, snippet, maxResults = 15)
         val curChap = readiumEngine.resolveChapterIndex(publication, nav.currentLocator.value)
-        val matchLoc = hits.firstOrNull { it.hit.chapterIndex == curChap }?.let {
-            readiumEngine.parseLocator(it.locatorJson)
-        } ?: hits.firstOrNull()?.let { readiumEngine.parseLocator(it.locatorJson) }
+        if (curChap != lastTtsChapIdx) { lastTtsChapIdx = curChap; lastTtsProg = 0.0 }
+        val chapHits = hits.filter { it.hit.chapterIndex == curChap }
+            .mapNotNull { readiumEngine.parseLocator(it.locatorJson) }
+        val matchLoc = chapHits.firstOrNull { (it.locations.progression ?: 0.0) >= (lastTtsProg - 0.02) }
+            ?: chapHits.firstOrNull()
+            ?: hits.firstOrNull()?.let { readiumEngine.parseLocator(it.locatorJson) }
         if (matchLoc != null) {
+            matchLoc.locations.progression?.let { p ->
+                if (readiumEngine.resolveChapterIndex(publication, matchLoc) == curChap) lastTtsProg = p
+            }
             nav.applyDecorations(
                 listOf(Decoration("tts-now", matchLoc, Decoration.Style.Highlight(tint = colors.accent.toArgb()))),
                 group = "tts-active"

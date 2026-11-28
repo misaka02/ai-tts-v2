@@ -90,6 +90,13 @@ enum class ReaderPageAnimation(val displayName: String) {
 }
 
 @Serializable
+enum class ReaderTtsChunkMode(val displayName: String, val description: String) {
+    SMART_MERGE("智能合并 (推荐)", "自动合并短段与对话至目标字数，减少请求且衔接最连贯"),
+    BY_PARAGRAPH("按段落分块", "每段独立送入引擎，朗读高亮与段落严格一一对应"),
+    BY_SENTENCE("按句子分块", "按句末标点精细切分，首句起播延迟最低")
+}
+
+@Serializable
 data class ReaderSettings(
     val paperTheme: ReaderPaperTheme = ReaderPaperTheme.CREAM,
     val fontSizeSp: Float = 18f,
@@ -130,7 +137,11 @@ data class ReaderSettings(
     val scriptConvert: ReaderScriptConvert = ReaderScriptConvert.NONE,
     val pageAnimation: ReaderPageAnimation = ReaderPageAnimation.SLIDE,
     val leftEdgeBrightnessGesture: Boolean = true,
-    val autoScrollSpeed: Int = 4
+    val autoScrollSpeed: Int = 4,
+    val ttsChunkMode: ReaderTtsChunkMode = ReaderTtsChunkMode.SMART_MERGE,
+    val ttsTargetChunkChars: Int = 220,
+    val ttsPreloadCount: Int = 2,
+    val ttsSmartRubyReading: Boolean = true
 ) {
     fun effectiveIndentEm(): Float = when {
         paragraphIndentEm >= 0f -> paragraphIndentEm

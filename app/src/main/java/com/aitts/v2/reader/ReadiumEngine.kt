@@ -146,12 +146,11 @@ class ReadiumEngine(context: Context) {
         val cleanTarget = normalizeHref(href)
         if (cleanTarget.isEmpty()) return@withContext null
         val allLinks = publication.resources + publication.readingOrder
-        val match = allLinks.firstOrNull { link ->
-            val linkHref = normalizeHref(link.href.toString())
-            linkHref == cleanTarget ||
-                linkHref.endsWith("/$cleanTarget") ||
-                cleanTarget.endsWith("/$linkHref")
-        } ?: return@withContext null
+        val match = allLinks.firstOrNull { normalizeHref(it.href.toString()) == cleanTarget }
+            ?: allLinks.firstOrNull { link ->
+                val linkHref = normalizeHref(link.href.toString())
+                linkHref.endsWith("/$cleanTarget") || cleanTarget.endsWith("/$linkHref")
+            } ?: return@withContext null
         val resource = publication.get(match) ?: return@withContext null
         try {
             val len = resource.length().getOrNull() ?: 0L
@@ -190,6 +189,17 @@ class ReadiumEngine(context: Context) {
 
     fun locatorFromChapter(publication: Publication, chapterIndex: Int): Locator? {
         val link = publication.readingOrder.getOrNull(chapterIndex) ?: return null
+        return publication.locatorFromLink(link)
+    }
+
+    fun locatorFromHref(publication: Publication, rawHref: String): Locator? {
+        val clean = normalizeHref(rawHref)
+        if (clean.isEmpty()) return null
+        val link = publication.readingOrder.firstOrNull { normalizeHref(it.href.toString()) == clean }
+            ?: publication.readingOrder.firstOrNull { l ->
+                val lh = normalizeHref(l.href.toString())
+                lh.endsWith("/$clean") || clean.endsWith("/$lh")
+            } ?: return null
         return publication.locatorFromLink(link)
     }
 

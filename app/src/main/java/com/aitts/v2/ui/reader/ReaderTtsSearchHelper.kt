@@ -41,10 +41,26 @@ internal class ReaderTtsSearchHelper(
         val index = st.index ?: return
         val pub = st.readiumPublication ?: return
         val loc = container.readiumEngine.parseLocator(locatorJson)
-        val chapIdx = loc?.let { container.readiumEngine.resolveChapterIndex(pub, it) } ?: st.currentChapterIndex
+        val rawHref = loc?.href?.toString().orEmpty().substringBefore('#').trimStart('/')
+        val resolvedIdx = if (rawHref.isNotBlank()) {
+            val exact = index.chapters.indexOfFirst { it.locator.substringBefore('#').trimStart('/') == rawHref }
+            if (exact >= 0) exact else index.chapters.indexOfFirst {
+                val c = it.locator.substringBefore('#').trimStart('/')
+                c.endsWith("/$rawHref") || rawHref.endsWith("/$c")
+            }
+        } else -1
+        val chapIdx = if (resolvedIdx in index.chapters.indices) resolvedIdx else {
+            (loc?.let { container.readiumEngine.resolveChapterIndex(pub, it) } ?: st.currentChapterIndex)
+                .coerceIn(0, (index.chapters.size - 1).coerceAtLeast(0))
+        }
+        val ref = index.chapters.getOrNull(chapIdx) ?: return
+        val smartRuby = container.bookLibrary.settingsFlow.value.ttsSmartRubyReading
         scope.launch {
             val loaded = withContext(Dispatchers.IO) {
-                BookFormatRegistry.parserFor(record.format).loadChapter(container.bookLibrary.bookFile(record), index.chapters[chapIdx])
+                val bookFile = container.bookLibrary.bookFile(record)
+                val parser = BookFormatRegistry.parserFor(record.format)
+                if (parser is com.aitts.v2.reader.parser.EpubBookParser) parser.loadChapter(bookFile, ref, smartRuby)
+                else parser.loadChapter(bookFile, ref)
             }
             val needle = quote.trim().take(16)
             val matchIdx = if (needle.isNotBlank()) {
@@ -72,7 +88,7 @@ internal class ReaderTtsSearchHelper(
     }
 
     suspend fun observeTtsSync(
-        onReadiumChapterJump: (Int) -> Unit,
+        onReadiumChapterJump: (Int, String) -> Unit,
         onNativeChapterLoad: suspend (BookRecord, BookIndex, Int, Int) -> Unit
     ) {
         container.readerTts.stateFlow.collect { tts ->
@@ -88,9 +104,12 @@ internal class ReaderTtsSearchHelper(
             }
             val st = state.value
             if (st.readiumPublication != null) {
-                if (tts.chapterIndex != st.currentChapterIndex && tts.chapterIndex != lastSyncedTtsChapter) {
+                val curHref = container.readiumEngine.parseLocator(st.currentLocatorJson)?.href?.toString().orEmpty()
+                val sameHref = tts.chapterHref.isNotBlank() && curHref.isNotBlank() &&
+                    (curHref.substringBefore('#').trimStart('/') == tts.chapterHref.substringBefore('#').trimStart('/'))
+                if (!sameHref && tts.chapterIndex != st.currentChapterIndex && tts.chapterIndex != lastSyncedTtsChapter) {
                     lastSyncedTtsChapter = tts.chapterIndex
-                    onReadiumChapterJump(tts.chapterIndex)
+                    onReadiumChapterJump(tts.chapterIndex, tts.chapterHref)
                 }
                 return@collect
             }

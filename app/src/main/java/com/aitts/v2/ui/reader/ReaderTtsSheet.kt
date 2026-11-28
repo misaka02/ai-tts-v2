@@ -28,6 +28,7 @@ import com.aitts.v2.model.AcousticMapper
 import com.aitts.v2.model.ProviderDescriptorRegistry
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.reader.model.ReaderSettings
+import com.aitts.v2.reader.model.ReaderTtsChunkMode
 import com.aitts.v2.ui.theme.InkPaperCard
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -65,7 +66,7 @@ fun ReaderTtsSheet(
         ) {
             Text("听书控制台", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                text = "支持 EPUB 划词“从此朗读”或正文长按直接起读；音色与语速更改将对后续段落即时生效。",
+                text = "支持 EPUB 划词“从此朗读”或长按起读；更改引擎、语速与分块设置后将自动丢弃旧预取并对下一块即时生效。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -87,11 +88,10 @@ fun ReaderTtsSheet(
                 Text("语速 ${"%.2f".format(activeProvider.speed)}×", style = MaterialTheme.typography.labelMedium)
                 Slider(
                     value = activeProvider.speed.coerceIn(speedRange.start, speedRange.endInclusive),
-                    onValueChange = onSpeedChange,
-                    valueRange = speedRange
+                    onValueChange = onSpeedChange, valueRange = speedRange
                 )
                 Text(
-                    text = acoustic.speedModeLabel,
+                    acoustic.speedModeLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -104,6 +104,8 @@ fun ReaderTtsSheet(
                 }
             }
 
+            TtsChunkingCard(readerSettings = readerSettings, onUpdateReaderSettings = onUpdateReaderSettings)
+
             InkPaperCard(padding = 14.dp) {
                 Text(
                     text = if (sleepActive) "睡眠定时 (${sleepRemainingSec / 60}m${sleepRemainingSec % 60}s)" else "睡眠定时",
@@ -111,27 +113,70 @@ fun ReaderTtsSheet(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0 to "关闭", 15 to "15分", 30 to "30分", 60 to "60分").forEach { (mins, label) ->
-                        FilterChip(
-                            selected = (mins == 0 && !sleepActive),
-                            onClick = { onSetSleepTimer(mins) },
-                            label = { Text(label) }
-                        )
+                        FilterChip(selected = (mins == 0 && !sleepActive), onClick = { onSetSleepTimer(mins) }, label = { Text(label) })
                     }
                 }
                 TtsToggleLine("听书自动滚屏/翻页高亮", readerSettings.autoScrollOnTts) { on ->
                     onUpdateReaderSettings { it.copy(autoScrollOnTts = on) }
                 }
-                TtsToggleLine("章节结束自动连播下一章", readerSettings.autoNextChapterOnTts) { on ->
+                TtsToggleLine("章节结束自动跨章预加载连播", readerSettings.autoNextChapterOnTts) { on ->
                     onUpdateReaderSettings { it.copy(autoNextChapterOnTts = on) }
                 }
                 TtsToggleLine("悬浮实时字幕", floatingSubtitleEnabled, onToggleSubtitle)
             }
 
             if (isPlayingOrSynthesizing) {
-                OutlinedButton(onClick = onStopTts, modifier = Modifier.fillMaxWidth()) {
-                    Text("停止当前听书")
-                }
+                OutlinedButton(onClick = onStopTts, modifier = Modifier.fillMaxWidth()) { Text("停止当前听书") }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TtsChunkingCard(
+    readerSettings: ReaderSettings,
+    onUpdateReaderSettings: ((ReaderSettings) -> ReaderSettings) -> Unit
+) {
+    InkPaperCard(padding = 14.dp) {
+        Text("文本分块与无缝预加载", style = MaterialTheme.typography.labelMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ReaderTtsChunkMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = readerSettings.ttsChunkMode == mode,
+                    onClick = { onUpdateReaderSettings { it.copy(ttsChunkMode = mode) } },
+                    label = { Text(mode.displayName) }
+                )
+            }
+        }
+        Text(
+            text = readerSettings.ttsChunkMode.description,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        StepperSliderRow(
+            label = "单块目标字数",
+            valueText = "${readerSettings.ttsTargetChunkChars} 字",
+            value = readerSettings.ttsTargetChunkChars.toFloat(),
+            valueRange = 80f..600f,
+            step = 20f,
+            onValueChange = { v ->
+                val snapped = snapStep(v, 20f).toInt().coerceIn(80, 600)
+                onUpdateReaderSettings { it.copy(ttsTargetChunkChars = snapped) }
+            }
+        )
+        Text("后台预解码缓冲深度", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (count in 1..4) {
+                FilterChip(
+                    selected = readerSettings.ttsPreloadCount == count,
+                    onClick = { onUpdateReaderSettings { it.copy(ttsPreloadCount = count) } },
+                    label = { Text("$count 块") }
+                )
+            }
+        }
+        TtsToggleLine("轻小说注音智能朗读 (<ruby> 符号读注释)", readerSettings.ttsSmartRubyReading) { on ->
+            onUpdateReaderSettings { it.copy(ttsSmartRubyReading = on) }
         }
     }
 }
@@ -143,7 +188,7 @@ private fun TtsToggleLine(label: String, checked: Boolean, onCheckedChange: (Boo
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(end = 12.dp))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

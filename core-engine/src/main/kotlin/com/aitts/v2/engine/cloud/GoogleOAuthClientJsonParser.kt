@@ -2,6 +2,7 @@ package com.aitts.v2.engine.cloud
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.IOException
@@ -11,7 +12,8 @@ data class ParsedGoogleOAuthClient(
     val clientSecret: String,
     val clientType: String,
     val refreshToken: String = "",
-    val accessToken: String = ""
+    val accessToken: String = "",
+    val loopbackRedirectUri: String = ""
 )
 
 /**
@@ -33,7 +35,7 @@ object GoogleOAuthClientJsonParser {
         val root = runCatching { json.parseToJsonElement(text).jsonObject }
             .getOrElse { throw IOException("无法识别凭证格式，请导入 Google Cloud Desktop JSON、token.json 或 rclone.conf") }
 
-        val (typeLabel, payload) = pickPayloadObject(root)
+        val (typeLabel, payload, loopbackUri) = pickPayloadObject(root)
         val clientId = payload["client_id"]?.jsonPrimitive?.content?.trim().orEmpty()
         val clientSecret = payload["client_secret"]?.jsonPrimitive?.content?.trim().orEmpty()
         val refreshToken = payload["refresh_token"]?.jsonPrimitive?.content?.trim().orEmpty()
@@ -49,22 +51,38 @@ object GoogleOAuthClientJsonParser {
             clientSecret = clientSecret,
             clientType = typeLabel,
             refreshToken = refreshToken,
-            accessToken = accessToken
+            accessToken = accessToken,
+            loopbackRedirectUri = loopbackUri
         )
     }
 
-    private fun pickPayloadObject(root: JsonObject): Pair<String, JsonObject> {
+    private val LOOPBACK_URI_RE = Regex("^http://(127\\.0\\.0\\.1|localhost):(\\d+)(/.*)?$")
+
+    private fun pickPayloadObject(root: JsonObject): Triple<String, JsonObject, String> {
         root["installed"]?.let { element ->
-            return "installed" to element.jsonObject
+            return Triple("installed", element.jsonObject, "")
         }
-        if (root["web"] != null) {
+        root["web"]?.let { element ->
+            val webObj = element.jsonObject
+            val uris = webObj["redirect_uris"]?.jsonArray.orEmpty()
+                .mapNotNull { runCatching { it.jsonPrimitive.content.trim() }.getOrNull() }
+            val matchedLoopback = uris.firstOrNull { uri ->
+                val m = LOOPBACK_URI_RE.matchEntire(uri) ?: return@firstOrNull false
+                val port = m.groupValues[2].toIntOrNull() ?: return@firstOrNull false
+                port in 1..65535
+            }
+            if (matchedLoopback != null) {
+                return Triple("web", webObj, matchedLoopback)
+            }
             throw IOException(
-                "检测到 Web 应用 (web) 凭证：Google 不允许 Web 凭证使用随机本地回环端口。\n" +
-                    "请在 Google Cloud Console 改为创建「桌面应用 (Desktop app)」OAuth 客户端并下载对应 JSON。"
+                "检测到 Web 应用 (web) 凭证且未配置本机回环回调。\n" +
+                    "请任选其一：\n" +
+                    "1. 在 Google Cloud Console 新建「桌面应用 (Desktop app)」OAuth 客户端（推荐）；\n" +
+                    "2. 或在该 Web 客户端的「已获授权的重定向 URI」中添加 http://127.0.0.1:53682/callback 后重新下载 JSON。"
             )
         }
         val label = if (root["refresh_token"] != null) "token_json" else "flat"
-        return label to root
+        return Triple(label, root, "")
     }
 
     private fun parseRcloneConf(raw: String): ParsedGoogleOAuthClient? {

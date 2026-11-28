@@ -61,6 +61,8 @@ class MainActivity : FragmentActivity() {
 
     private fun extractIncomingBookUri(intent: Intent?): android.net.Uri? {
         if (intent?.action != Intent.ACTION_VIEW) return null
-        return intent.data
+        val uri = intent.data ?: return null
+        if (uri.scheme.equals("aitts", ignoreCase = true)) return null
+        return uri
     }
 }

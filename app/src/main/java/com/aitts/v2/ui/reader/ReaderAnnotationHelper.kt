@@ -125,10 +125,11 @@ internal class ReaderAnnotationHelper(
             val cleanHref = resolvedHref.substringBefore('#').trimStart('/')
             val frag = resolvedHref.substringAfter('#', "").trim()
             val allLinks = pub.readingOrder + pub.resources
-            val link = allLinks.firstOrNull {
-                val lHref = it.href.toString().substringBefore('#').trimStart('/')
-                lHref == cleanHref || lHref.endsWith("/$cleanHref") || cleanHref.endsWith("/$lHref")
-            }
+            val link = allLinks.firstOrNull { it.href.toString().substringBefore('#').trimStart('/') == cleanHref }
+                ?: allLinks.firstOrNull {
+                    val lHref = it.href.toString().substringBefore('#').trimStart('/')
+                    lHref.endsWith("/$cleanHref") || cleanHref.endsWith("/$lHref")
+                }
             val baseLoc = link?.let { pub.locatorFromLink(it) } ?: return@launch
             val loc = if (frag.isNotBlank()) {
                 baseLoc.copy(locations = baseLoc.locations.copy(fragments = listOf(frag)))

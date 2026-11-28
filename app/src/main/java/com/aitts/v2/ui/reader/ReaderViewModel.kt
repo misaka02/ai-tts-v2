@@ -83,9 +83,11 @@ class ReaderViewModel(
         }
         viewModelScope.launch {
             ttsSearch.observeTtsSync(
-                onReadiumChapterJump = { chapIdx ->
+                onReadiumChapterJump = { chapIdx, href ->
                     _uiState.value.readiumPublication?.let { pub ->
-                        container.readiumEngine.locatorFromChapter(pub, chapIdx)?.let { goToLocatorChannel.trySend(it) }
+                        val loc = container.readiumEngine.locatorFromHref(pub, href)
+                            ?: container.readiumEngine.locatorFromChapter(pub, chapIdx)
+                        loc?.let { goToLocatorChannel.trySend(it) }
                     }
                 },
                 onNativeChapterLoad = { rec, idx, chapIdx, blk -> loadNativeChapter(rec, idx, chapIdx, blk) }

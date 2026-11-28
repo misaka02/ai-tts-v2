@@ -17,7 +17,6 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -94,120 +93,6 @@ fun FileNodeRow(
             }
             IconButton(onClick = onRename) { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = "重命名") }
             IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除") }
-        }
-    }
-}
-
-@Composable
-fun GoogleDriveAuthCard(
-    clientId: String,
-    clientSecret: String,
-    errorMessage: String?,
-    isBusy: Boolean,
-    isBrowserWaiting: Boolean,
-    pendingAuthUrl: String,
-    pastedCallbackUrl: String,
-    packageName: String,
-    signingSha1: String,
-    onUpdateClient: (String?, String?) -> Unit,
-    onUpdatePastedUrl: (String) -> Unit,
-    onImportJson: () -> Unit,
-    onOpenCloudConsole: () -> Unit,
-    onBrowserSignIn: () -> Unit,
-    onCopyAuthUrl: () -> Unit,
-    onSubmitManualCallback: () -> Unit,
-    onCancelBrowserSignIn: () -> Unit,
-    onOneTapSignIn: () -> Unit,
-    onCopySigningInfo: () -> Unit,
-    onOpenSafPicker: () -> Unit,
-    onOpenDevTokenSheet: () -> Unit
-) {
-    var showManualClient by remember { mutableStateOf(false) }
-    var showGuide by remember { mutableStateOf(false) }
-    var showSignInfo by remember { mutableStateOf(false) }
-
-    InkPaperCard(padding = 16.dp) {
-        Text("连接 Google 云端硬盘", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Button(onClick = onOpenSafPicker, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
-            Text("系统网盘直选导入电子书 (SAF · 免配置立即可用)")
-        }
-        Text(
-            text = "若需完整网盘目录管理与进度双向同步，支持导入个人 client_secret.json / rclone.conf / token.json 或开启同页 WebDAV (Alist)。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        if (!errorMessage.isNullOrBlank()) {
-            Text(errorMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = onImportJson, enabled = !isBusy, modifier = Modifier.weight(1f)) {
-                Text("导入 JSON / rclone")
-            }
-            TextButton(onClick = { showManualClient = !showManualClient }) { Text(if (showManualClient) "收起" else "手填ID") }
-            TextButton(onClick = { showGuide = !showGuide }) { Text(if (showGuide) "收起向导" else "配置向导") }
-        }
-        if (showGuide) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "1. 前往 Google Cloud Console 启用 Google Drive API；\n" +
-                        "2. 「凭据」新建 OAuth 客户端 ID，应用类型选「桌面应用 (Desktop app)」；\n" +
-                        "3. 下载 JSON 后点击上方「导入 JSON / rclone」，再用浏览器授权一次即可自动续期。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                TextButton(onClick = onOpenCloudConsole) { Text("打开 Google Cloud 凭据控制台 ↗") }
-            }
-        }
-        if (showManualClient || clientId.isNotBlank()) {
-            Text(
-                text = if (clientId.isNotBlank()) "已持久化 Client ID: ${clientId.take(24)}..." else "尚未配置桌面端 OAuth Client ID",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-        if (showManualClient) {
-            OutlinedTextField(
-                value = clientId, onValueChange = { onUpdateClient(it, null) },
-                label = { Text("OAuth Client ID") }, singleLine = true, modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = clientSecret, onValueChange = { onUpdateClient(null, it) },
-                label = { Text("Client Secret (可选)") }, singleLine = true, modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        if (isBrowserWaiting) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    if (pendingAuthUrl.isNotBlank()) {
-                        OutlinedButton(onClick = onCopyAuthUrl, modifier = Modifier.weight(1f)) { Text("复制链接") }
-                    }
-                    OutlinedButton(onClick = onCancelBrowserSignIn, modifier = Modifier.weight(1f)) { Text("取消等待") }
-                }
-                OutlinedTextField(
-                    value = pastedCallbackUrl, onValueChange = onUpdatePastedUrl,
-                    label = { Text("若未自动跳回，粘贴浏览器回调 URL") }, singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                Button(onClick = onSubmitManualCallback, modifier = Modifier.fillMaxWidth()) { Text("提交回调 URL 完成登录") }
-            }
-        } else {
-            Button(onClick = onBrowserSignIn, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
-                Text("浏览器 OAuth 永久连接 (Custom Tabs)")
-            }
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onOneTapSignIn, enabled = !isBusy) { Text("Play 服务授权") }
-            TextButton(onClick = { showSignInfo = !showSignInfo }) { Text(if (showSignInfo) "隐藏SHA-1" else "SHA-1诊断") }
-            TextButton(onClick = onOpenDevTokenSheet) { Text("手动Token") }
-        }
-        if (showSignInfo) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("包名: $packageName\nSHA-1: $signingSha1", style = MaterialTheme.typography.labelSmall)
-                TextButton(onClick = onCopySigningInfo) { Text("一键复制包名与 SHA-1") }
-            }
         }
     }
 }
@@ -295,33 +180,6 @@ fun DeleteFileConfirmDialog(
         title = { Text("删除确认") },
         text = { Text("确定要删除「${node.name}」吗？") },
         confirmButton = { TextButton(onClick = onConfirm) { Text("删除") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
-}
-
-@Composable
-fun DevTokenConnectDialog(
-    token: String,
-    onUpdateToken: (String) -> Unit,
-    onConnect: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("手动 Token 接入 (高级)") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("仅用于已有短期 Access Token 的临时验证。", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = onUpdateToken,
-                    label = { Text("Google Drive Access Token") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onConnect) { Text("连接") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }

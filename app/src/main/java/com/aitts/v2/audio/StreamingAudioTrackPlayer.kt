@@ -28,6 +28,14 @@ class StreamingAudioTrackPlayer {
     private val _rmsFlow = MutableStateFlow(0f)
     val rmsFlow: StateFlow<Float> = _rmsFlow.asStateFlow()
 
+    fun ensureStreamOpen(sampleRate: Int = 24000) {
+        val isReady = synchronized(lock) {
+            val active = track
+            active != null && currentSampleRate == sampleRate && active.playState == AudioTrack.PLAYSTATE_PLAYING
+        }
+        if (!isReady) openStream(sampleRate)
+    }
+
     fun openStream(sampleRate: Int = 24000) {
         stop()
         val minBuf = AudioTrack.getMinBufferSize(

@@ -53,7 +53,10 @@ class EpubBookParser : BookFormatParser {
         }
     }
 
-    override fun loadChapter(file: File, chapter: ChapterRef): ChapterContent {
+    override fun loadChapter(file: File, chapter: ChapterRef): ChapterContent =
+        loadChapter(file, chapter, smartRubyReading = true)
+
+    fun loadChapter(file: File, chapter: ChapterRef, smartRubyReading: Boolean): ChapterContent {
         ZipFile(file).use { zip ->
             val path = EpubXmlSupport.normalizeZipPath("", chapter.locator)
                 ?: throw IOException("非法章节路径: ${chapter.locator}")
@@ -61,7 +64,7 @@ class EpubBookParser : BookFormatParser {
                 ?: throw IOException("章节不存在或超出大小限制: $path")
             val detected = CharsetDetector.detectMarkup(bytes, isTruncatedSample = false)
             val html = String(bytes, detected.bomLength, bytes.size - detected.bomLength, detected.charset)
-            val blocks = EpubHtmlParser.parse(html, EpubXmlSupport.parentDir(path))
+            val blocks = EpubHtmlParser.parse(html, EpubXmlSupport.parentDir(path), smartRubyReading, stripNoterefMarkers = true)
             return ChapterContent(chapter.index, chapter.title, blocks)
         }
     }

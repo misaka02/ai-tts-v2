@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -67,28 +68,30 @@ class GoogleDriveRepository(
     suspend fun authorizeInBrowser(
         clientId: String,
         clientSecret: String,
+        preferredRedirectUri: String = "",
         onLaunchUrl: (String) -> Unit
     ): Result<GoogleDriveAuthConfig> =
-        loopbackAuth.authorizeInBrowser(clientId, clientSecret, onLaunchUrl, ::saveConfig)
+        loopbackAuth.authorizeInBrowser(clientId, clientSecret, preferredRedirectUri, onLaunchUrl, ::saveConfig)
 
     fun cancelPendingAuth() = loopbackAuth.cancelPending()
 
     fun completeManualBrowserCallback(pastedUrl: String): Boolean = loopbackAuth.completeManuallyFromUrl(pastedUrl)
 
-    fun saveDraftClientCredentials(clientId: String, clientSecret: String) {
+    fun saveDraftClientCredentials(clientId: String, clientSecret: String, redirectUri: String = "") {
         val cleanId = clientId.trim()
         val cleanSec = clientSecret.trim()
+        val cleanRedir = redirectUri.trim()
         if (cleanId.isEmpty()) return
-        val draft = GoogleDriveAuthConfig(clientId = cleanId, clientSecret = cleanSec)
+        val draft = DraftDriveClient(clientId = cleanId, clientSecret = cleanSec, redirectUri = cleanRedir)
         runCatching { secretStore.saveSecretString(DRAFT_CLIENT_KEY, json.encodeToString(draft)) }
     }
 
-    fun loadDraftClientCredentials(): Pair<String, String> {
-        val raw = secretStore.getSecretString(DRAFT_CLIENT_KEY) ?: return "" to ""
+    fun loadDraftClientCredentials(): Triple<String, String, String> {
+        val raw = secretStore.getSecretString(DRAFT_CLIENT_KEY) ?: return Triple("", "", "")
         return runCatching {
-            val cfg = json.decodeFromString<GoogleDriveAuthConfig>(raw)
-            cfg.clientId.trim() to cfg.clientSecret.trim()
-        }.getOrDefault("" to "")
+            val cfg = json.decodeFromString<DraftDriveClient>(raw)
+            Triple(cfg.clientId.trim(), cfg.clientSecret.trim(), cfg.redirectUri.trim())
+        }.getOrDefault(Triple("", "", ""))
     }
 
     suspend fun connectWithTokens(
@@ -247,6 +250,13 @@ class GoogleDriveRepository(
         private const val DRAFT_CLIENT_KEY = "google_drive_draft_client_v1"
     }
 }
+
+@Serializable
+private data class DraftDriveClient(
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val redirectUri: String = ""
+)
 
 private fun DriveFileItem.toCloudNode() = CloudFileNode(
     id = id,

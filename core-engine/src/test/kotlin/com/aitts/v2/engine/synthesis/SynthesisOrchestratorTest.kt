@@ -235,6 +235,41 @@ class SynthesisOrchestratorTest {
         assertEquals(listOf(2, 2, 5), receivedSourceIndices)
     }
 
+    @Test
+    fun `synthesizeSegmentPcm pre-decodes 24kHz PCM and hits disk cache on repeat calls`() = runTest {
+        val http = HttpClientManager()
+        val logger = EngineLogger()
+        val cache = AudioDiskCache(tempFolder.newFolder("cache_pcm"))
+        val audioPipeline = AudioPipeline { bytes, rate -> Result.success(DecodedPcm(bytes, rate, 1)) }
+        val synthCalls = AtomicInteger(0)
+        val mockProvider = object : TtsProvider {
+            override val type = ProviderType.OFFLINE_SHERPA
+            override val capabilities = ProviderCapabilities()
+            override suspend fun fetchVoices(config: TtsProviderConfig, credentials: ProviderCredentials): List<VoiceModel> = emptyList()
+            override suspend fun synthesize(request: ProviderSynthesisRequest): Result<SynthesizedAudio> {
+                synthCalls.incrementAndGet()
+                return Result.success(SynthesizedAudio(ByteArray(64) { 1 }, 24000, isRawPcm = true))
+            }
+        }
+        val registry = TtsProviderRegistry(http, offlineProvider = mockProvider)
+        val orchestrator = SynthesisOrchestrator(registry, audioPipeline, cache, http, logger)
+        val cfg = TtsProviderConfig(id = "off_pcm", type = ProviderType.OFFLINE_SHERPA, name = "Offline")
+        val input = SynthesisInput(
+            rawText = "",
+            settings = GlobalSettings(isAudioCacheEnabled = true),
+            activeConfig = cfg,
+            allProviders = listOf(cfg),
+            rules = emptyList(),
+            credentialsLookup = { ProviderCredentials() }
+        )
+
+        val pcm1 = orchestrator.synthesizeSegmentPcm("预解码缓存测试", cfg, ProviderCredentials(), input, "s_pcm").getOrThrow()
+        val pcm2 = orchestrator.synthesizeSegmentPcm("预解码缓存测试", cfg, ProviderCredentials(), input, "s_pcm").getOrThrow()
+        assertEquals(64, pcm1.size)
+        assertEquals(pcm1.toList(), pcm2.toList())
+        assertEquals(1, synthCalls.get())
+    }
+
     private fun recordingSink(onComplete: () -> Unit) = object : SynthesisSink {
         override fun onStart(sampleRate: Int) = true
         override fun onPcmChunk(pcm16Bytes: ByteArray) {}

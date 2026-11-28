@@ -3,22 +3,20 @@
 ## 1. 项目概览
 - **旧工程**：`E:\antigravity\workspace\ai-tts-android`（分支 `feature/pulse-theme-v4` @ `0706aa1`）
 - **新工程**：`E:\antigravity\workspace\ai-tts-v2`（分支 `main`，已发布至 `https://github.com/misaka02/ai-tts-v2`）
-- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；已清理旧 Pre-release `v2.5.0-pre.1`，**唯一最新预发布 [v2.6.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.6.0-pre.1)**（Pre-release，阅读器安全居中热区与零抽搐菜单 + 《创约 某魔法的禁书目录 11》EPUB 3 全格式/注音/注脚弹窗与嵌入字体保真 + Google Drive SAF 置顶/Custom Tabs/`rclone.conf` 与 `token.json` 一键解析及草稿持久化，附带 `ai-tts-v2-v2.6.0-pre.1-cloud-r8-signed.apk` 与 `ai-tts-v2-v2.6.0-pre.1-full-r8-signed.apk`）。
+- **GitHub Release**：正式基线 [v2.0.0](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.0.0)；已清理旧 Pre-release `v2.6.0-pre.1`，**唯一最新预发布 [v2.7.0-pre.1](https://github.com/misaka02/ai-tts-v2/releases/tag/v2.7.0-pre.1)**（Pre-release，听书分块模式与 `80..600` 目标字数 + 轻小说 `<ruby>` 符号读注释 + 24kHz PCM 后台预解码与单 `AudioTrack` 跨章无缝衔接 + EPUB `href` 与顺序高亮对齐 + Google Drive Play/OAuth/SAF/WebDAV 授权深化重构，附带 `ai-tts-v2-v2.7.0-pre.1-cloud-r8-signed.apk` 与 `ai-tts-v2-v2.7.0-pre.1-full-r8-signed.apk`）。
 - **全局规范持久化**：已向 `C:\Users\s1356\.gemini\GEMINI.md`、`C:\Users\s1356\.gemini\config\rules\AGENTS.md` 与 `C:\Users\s1356\.gemini\config\plugins\user-workspace-rules\rules\AGENTS.md` 写入“Android 编译默认交付 R8 压缩签名包 + 默认发布 GitHub Pre-release”规则。
-- **当前最新验证与产物（2026-11-28 v2.6.0-pre.1 阅读器零抽搐/EPUB 3 全格式保真 + Google Drive 登录优化第 1 轮交付）**：
+- **当前最新验证与产物（2026-11-28 v2.7.0-pre.1 听书跨章无缝预解码 + `<ruby>` 智能朗读 + Google Drive 授权重构第 2 轮交付）**：
   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`）
-  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 36s`，`0` Kotlin/Java 警告与错误，`Detekt` 0 issues，`Lint` 0 errors，**63/63 单测全部通过**：`core-model` 6、`core-engine` 38、`core-reader` 14、`app` 5；0 跳过、0 失败、0 错误）
-  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **6,599,300 字节**（约 **6.29 MiB**，SHA-256 `67452B0FD5191109BA41512F9415A27DFC0C7B316F49F02DB30DFA63562F1299`，`apksigner` 校验通过）
-  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **30,290,302 字节**（约 **28.89 MiB**，SHA-256 `35D5879C903D98EC25B19DF2E178D669C88EDC48FD2F1EE08C45971B7F5DC2D1`，`apksigner` 校验通过）
-  - **Android `pixel_34` 使用真实 EPUB 《创约 某魔法的禁书目录 11》实机模拟器截图验收**（`0` 应用/Readium 崩溃）：
-    - [01_chuangyue11_fxl_center_tap.png](screenshots/v2.6.0-pre.1/01_chuangyue11_fxl_center_tap.png)（FXL 封面居中点击呼出阅读栏，不误翻页不误弹灯箱）
-    - [02_chuangyue11_toc_nested.png](screenshots/v2.6.0-pre.1/02_chuangyue11_toc_nested.png)（31 项多级嵌套目录与子章节跳转）
-    - [03_chuangyue11_body_fidelity.png](screenshots/v2.6.0-pre.1/03_chuangyue11_body_fidelity.png)（《创约 11》第一章嵌入字体、悬挂标点、返回跳转前位置胶囊与精确百分比）
-    - [04_chuangyue11_footnote_popup.png](screenshots/v2.6.0-pre.1/04_chuangyue11_footnote_popup.png)（点击 `㊟` 原地弹出 `注释说明` 弹窗并正常渲染 `<ruby>` 注音）
-    - [05_reader_layout_overlay_clean.png](screenshots/v2.6.0-pre.1/05_reader_layout_overlay_clean.png)（打开排版设置面板自动隐藏上下栏、正文无抽搐）
-    - [06_gdrive_auth_card_v26.png](screenshots/v2.6.0-pre.1/06_gdrive_auth_card_v26.png)（重设计 Google 网盘连接卡：SAF 主按钮置顶、`JSON / rclone` 导入与 Custom Tabs 授权）
-  - **Qodo CLI 审查（v2.6.0-pre.1，达 2 轮上限）**：第 1 轮（`operation_id: ca81e178-78c5-4cc7-964c-4c9052e14fee`）检出 2 项 `introduced` `action_required` 发现（`51c49e40` `parseRcloneConf` 缺 `client_id` 校验与 `d60d017b` 空注脚锚点/跳转丢失 `#fragment`）并当轮修复；第 2 轮（`operation_id: a6637c71-551e-4bbb-9add-387b95bf1426`）确认第 1 轮两项已转 **`resolved`**、0 新增 `action_required`（仅 1 条极端同文件名后缀提示 `3897d404` `remediation_recommended` 记入已知边界）。
-- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**170 个 `.kt` 文件 / 27,407 行**（另含 `Sonic.java`；`core-model/src` 14/1,416、`core-engine/src` 48/6,373、`core-reader/src` 14/2,480、`app/src` 94/17,138，全 `src/main` 文件严格 `<= 350` 行）
+  - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`：退出码 `0`（`BUILD SUCCESSFUL in 3m 47s`，`0` Kotlin/Java 警告与错误，`Detekt` 0 issues，`Lint` 0 errors，**69/69 单测全部通过**：`core-model` 6、`core-engine` 40、`core-reader` 16、`app` 7；0 跳过、0 失败、0 错误）
+  - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk) — **6,615,776 字节**（约 **6.31 MiB**，SHA-256 `CDEF850B37E8313EB9A4FE348B61408980EAC2B32B8477245A87B3153F9987EA`，`apksigner` 校验通过）
+  - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk) — **30,306,782 字节**（约 **28.90 MiB**，SHA-256 `C448BBE0431D84E8630FBEFA7F5BE1E1A88226C7816EBA05903ABC2B4F13161E`，`apksigner` 校验通过）
+  - **Android `pixel_34` 实机模拟器截图验收**（`0` 应用/Readium 崩溃）：
+    - [01_gdrive_auth_v27_redesigned.png](screenshots/v2.7.0-pre.1/01_gdrive_auth_v27_redesigned.png)（Google 网盘重构卡：Play 一键登录与 SAF 主按钮置顶、包名/SHA-1 一键复制、Custom Tabs/外部浏览器入口）
+    - [02_gdrive_guide_and_paste.png](screenshots/v2.7.0-pre.1/02_gdrive_guide_and_paste.png)（4 步 Test Users 指引与 `Client Secret (必填)` / `固定回调 URI` 输入栏）
+    - [03_reader_tts_chunking_sheet.png](screenshots/v2.7.0-pre.1/03_reader_tts_chunking_sheet.png)（《创约 11》听书控制台：3 种分块模式、`220 字` 目标字数、`1..4 块` 预加载深度及 `<ruby>` 智能朗读开关）
+    - [04_reader_tts_active_chuangyue11.png](screenshots/v2.7.0-pre.1/04_reader_tts_active_chuangyue11.png)（《创约 11》第一章听书起播高亮与状态切换验证）
+  - **Qodo CLI 审查（v2.7.0-pre.1，达 2 轮上限）**：第 1 轮（`operation_id: e2939112-eedf-4b81-9a22-7862076c2ad5`）检出 0 项 `action_required`、6 项 `remediation_recommended`（`f6a7894c`、`50bd993d`、`046e488a`、`59589e19`、`14f9b76a`、`7728c64a`）并当轮修复；第 2 轮（`operation_id: 831de2ae-53ef-4fc4-bf77-94a37608536c`）确认第 1 轮 6 项均已 **`resolved`**，新检出 `733f19c4` (`action_required` `endBlockIndex`) 与 5 项 `remediation_recommended`（`4e540e1f`、`84a1527f`、`16600f2a`、`674189fe`、`c7a60c8d`），均已批量修复并通过最终 69/69 单测与 `qualityGate assembleR8Release` 验收。
+- **最新代码体量总计**（所有 `src/` 目录，含单元测试，不含 `build/`）：**175 个 `.kt` 文件 / 28,364 行**（另含 `Sonic.java`；`core-model/src` 14/1,416、`core-engine/src` 48/6,467、`core-reader/src` 15/2,592、`app/src` 98/17,889，全 `src/main` 文件严格 `<= 350` 行）
 
 ## 2. 架构与核心改进对照
 

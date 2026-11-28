@@ -14,6 +14,8 @@ internal object EpubHtmlParser {
     private val HEADING_LEVELS = mapOf("h1" to 1, "h2" to 2, "h3" to 3, "h4" to 4, "h5" to 4, "h6" to 4)
     private val SKIP_TAGS = setOf("head", "script", "style", "rt", "rp", "noscript", "title", "svg")
     private val INLINE_TAGS = setOf("span", "a", "em", "strong", "b", "i", "u", "ruby", "rb", "small", "sub", "sup", "code")
+    private val HAS_READABLE_GLYPH_RE = Regex("[\\u4E00-\\u9FFF\\u3400-\\u4DBFA-Za-z0-9\\u3040-\\u30FF]")
+    private val NOTEREF_MARKER_RE = Regex("^[*†‡※㊟\\d\\[\\]()【】]+$")
 
     fun extractTitle(html: String): String = runCatching {
         Jsoup.parse(html).title().replace(Regex("\\s+"), " ").trim()
@@ -22,8 +24,15 @@ internal object EpubHtmlParser {
     fun decodeEntities(input: String): String =
         org.jsoup.parser.Parser.unescapeEntities(input, false)
 
-    fun parse(html: String, baseDir: String): List<ReaderBlock> {
+    fun parse(
+        html: String,
+        baseDir: String,
+        smartRubyReading: Boolean = true,
+        stripNoterefMarkers: Boolean = false
+    ): List<ReaderBlock> {
         val doc = Jsoup.parse(html)
+        if (smartRubyReading) resolveMaskedRubyNodes(doc)
+        if (stripNoterefMarkers) stripNoterefMarkers(doc)
         doc.select("head, script, style, rt, rp, noscript").remove()
         val body = doc.body()
         val state = ExtractorState(baseDir)
@@ -35,6 +44,28 @@ internal object EpubHtmlParser {
         }
         state.flushText(isQuote = false, headingLevel = 0)
         return state.blocks
+    }
+
+    private fun resolveMaskedRubyNodes(doc: org.jsoup.nodes.Document) {
+        for (ruby in doc.select("ruby")) {
+            val rtText = ruby.select("rt").joinToString("") { it.text().trim() }.trim()
+            if (rtText.isEmpty()) continue
+            val clone = ruby.clone()
+            clone.select("rt, rp").remove()
+            val baseText = clone.text().trim()
+            if (baseText.isNotEmpty() && !HAS_READABLE_GLYPH_RE.containsMatchIn(baseText)) {
+                ruby.replaceWith(org.jsoup.nodes.TextNode(rtText))
+            }
+        }
+    }
+
+    private fun stripNoterefMarkers(doc: org.jsoup.nodes.Document) {
+        for (a in doc.select("a")) {
+            val isNoteRef = a.attr("epub:type").contains("noteref", ignoreCase = true) || a.hasClass("noteref")
+            if (isNoteRef && NOTEREF_MARKER_RE.matches(a.text().trim())) {
+                a.remove()
+            }
+        }
     }
 
     private class ExtractorState(private val baseDir: String) {
@@ -181,9 +212,16 @@ object EpubFootnoteExtractor {
 
     private fun cleanNoteText(el: Element): String {
         val clone = el.clone()
+        val backSymbols = setOf("⤶", "↩", "↑", "←")
+        if (clone.tagName().equals("a", ignoreCase = true)) {
+            val selfTxt = clone.text().trim()
+            if (selfTxt.isEmpty() || selfTxt in backSymbols) return ""
+        }
         clone.select("a").forEach { a ->
-            val txt = a.text().trim()
-            if (txt.isEmpty() || txt in setOf("⤶", "↩", "↑", "←")) a.remove()
+            if (a !== clone) {
+                val txt = a.text().trim()
+                if (txt.isEmpty() || txt in backSymbols) a.remove()
+            }
         }
         return clone.text().replace(Regex("\\s+"), " ").trim()
     }
