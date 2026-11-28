@@ -143,10 +143,25 @@ class BookLibraryRepository(context: Context) {
         }
     }
 
+    private val settingsWriteExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+
+    @Volatile
+    private var pendingSettingsFuture: java.util.concurrent.ScheduledFuture<*>? = null
+
     fun updateSettings(settings: ReaderSettings) {
         synchronized(writeLock) {
             _settingsFlow.value = settings
-            writeAtomic(settingsFile, json.encodeToString(settings))
+            pendingSettingsFuture?.cancel(false)
+            pendingSettingsFuture = settingsWriteExecutor.schedule(
+                {
+                    val snapshot = _settingsFlow.value
+                    synchronized(writeLock) {
+                        writeAtomic(settingsFile, json.encodeToString(snapshot))
+                    }
+                },
+                200L,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
         }
     }
 

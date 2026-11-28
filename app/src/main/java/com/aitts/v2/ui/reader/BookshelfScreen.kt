@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,24 +14,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.CloudQueue
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Stop
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,8 +51,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.reader.model.BookRecord
 import com.aitts.v2.ui.theme.InkPaperCard
 import com.aitts.v2.ui.theme.InkSectionHeader
-import com.aitts.v2.ui.theme.InkStatusPill
-import com.aitts.v2.ui.theme.PillTone
 
 @Composable
 fun BookshelfScreen(
@@ -67,11 +63,13 @@ fun BookshelfScreen(
     val ttsState by viewModel.ttsStateFlow.collectAsStateWithLifecycle()
     val hasCloud by viewModel.hasCloudConnectedFlow.collectAsStateWithLifecycle()
     var pendingDeleteBook by remember { mutableStateOf<BookRecord?>(null) }
+    var editingBook by remember { mutableStateOf<BookRecord?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { viewModel.importBook(it) { importedId -> onOpenBook(importedId) } }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) viewModel.importBooks(uris) { importedId -> onOpenBook(importedId) }
     }
+    val importTypes = arrayOf("application/epub+zip", "text/plain", "text/markdown", "text/html", "*/*")
 
     LaunchedEffect(state.statusMessage) {
         state.statusMessage?.let { msg ->
@@ -92,7 +90,7 @@ fun BookshelfScreen(
                 hasCloud = hasCloud,
                 onSyncLocal = viewModel::syncDedicatedFolder,
                 onOpenFileManager = onOpenFileManager,
-                onImportClick = { picker.launch(arrayOf("application/epub+zip", "text/plain", "text/markdown", "text/html", "*/*")) }
+                onImportClick = { picker.launch(importTypes) }
             )
         }
 
@@ -146,22 +144,51 @@ fun BookshelfScreen(
             }
         }
 
-        if (state.books.isNotEmpty() || state.searchQuery.isNotEmpty()) {
+        if (state.books.isNotEmpty() || state.searchQuery.isNotEmpty() || state.selectedCategory.isNotEmpty()) {
             item {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = state.searchQuery,
-                        onValueChange = viewModel::updateSearchQuery,
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                        placeholder = { Text("检索书名或作者") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    Box {
-                        OutlinedButton(onClick = { showSortMenu = true }) { Text(state.sort.label) }
-                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                            BookshelfSort.entries.forEach { s ->
-                                DropdownMenuItem(text = { Text(s.label) }, onClick = { viewModel.updateSort(s); showSortMenu = false })
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = state.searchQuery,
+                            onValueChange = viewModel::updateSearchQuery,
+                            singleLine = true,
+                            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                            placeholder = { Text("检索书名或作者") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = viewModel::toggleGridMode) {
+                            Icon(
+                                imageVector = if (state.isGridMode) {
+                                    Icons.AutoMirrored.Outlined.FormatListBulleted
+                                } else Icons.Outlined.GridView,
+                                contentDescription = "切换网格/列表"
+                            )
+                        }
+                        Box {
+                            OutlinedButton(onClick = { showSortMenu = true }) { Text(state.sort.label) }
+                            DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                                BookshelfSort.entries.forEach { s ->
+                                    DropdownMenuItem(text = { Text(s.label) }, onClick = { viewModel.updateSort(s); showSortMenu = false })
+                                }
+                            }
+                        }
+                    }
+                    if (state.categories.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = state.selectedCategory.isEmpty(),
+                                onClick = { viewModel.selectCategory("") },
+                                label = { Text("全部") }
+                            )
+                            state.categories.forEach { cat ->
+                                FilterChip(
+                                    selected = state.selectedCategory == cat,
+                                    onClick = { viewModel.selectCategory(cat) },
+                                    label = { Text(cat) }
+                                )
                             }
                         }
                     }
@@ -172,11 +199,29 @@ fun BookshelfScreen(
         if (state.books.isEmpty() && !state.isImporting) {
             item {
                 BookshelfEmptyCard(
-                    onImportClick = { picker.launch(arrayOf("application/epub+zip", "text/plain", "text/markdown", "text/html", "*/*")) },
+                    onImportClick = { picker.launch(importTypes) },
                     onOpenFileManager = onOpenFileManager
                 )
             }
-        } else if (state.books.isNotEmpty()) {
+        } else if (state.isGridMode) {
+            val rows = state.books.chunked(3)
+            items(rows, key = { row -> row.joinToString("_") { it.id } }) { rowBooks ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (book in rowBooks) {
+                        BookGridCard(
+                            record = book,
+                            inMultiSelect = state.selectedIds.isNotEmpty(),
+                            selected = book.id in state.selectedIds,
+                            loadCover = { viewModel.loadCover(book) },
+                            onOpen = { if (state.selectedIds.isNotEmpty()) viewModel.toggleSelect(book.id) else onOpenBook(book.id) },
+                            onLongPress = { viewModel.toggleSelect(book.id) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    repeat(3 - rowBooks.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        } else {
             val recent = state.books.first()
             item { InkSectionHeader(if (recent.isPinned) "置顶书籍" else "最近阅读", trailing = recent.format.label) }
             item(key = "hero_${recent.id}") {
@@ -188,6 +233,7 @@ fun BookshelfScreen(
                     loadCover = { viewModel.loadCover(recent) },
                     onOpen = { if (state.selectedIds.isNotEmpty()) viewModel.toggleSelect(recent.id) else onOpenBook(recent.id) },
                     onLongPress = { viewModel.toggleSelect(recent.id) },
+                    onEditInfo = { editingBook = recent },
                     onTogglePin = { viewModel.togglePin(recent.id) },
                     onDelete = { pendingDeleteBook = recent }
                 )
@@ -204,6 +250,7 @@ fun BookshelfScreen(
                         loadCover = { viewModel.loadCover(book) },
                         onOpen = { if (state.selectedIds.isNotEmpty()) viewModel.toggleSelect(book.id) else onOpenBook(book.id) },
                         onLongPress = { viewModel.toggleSelect(book.id) },
+                        onEditInfo = { editingBook = book },
                         onTogglePin = { viewModel.togglePin(book.id) },
                         onDelete = { pendingDeleteBook = book }
                     )
@@ -223,59 +270,15 @@ fun BookshelfScreen(
             dismissButton = { TextButton(onClick = { pendingDeleteBook = null }) { Text("取消") } }
         )
     }
-}
 
-@Composable
-private fun BookshelfHeader(
-    bookCount: Int,
-    isImporting: Boolean,
-    hasCloud: Boolean,
-    onSyncLocal: () -> Unit,
-    onOpenFileManager: () -> Unit,
-    onImportClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("书架", style = MaterialTheme.typography.headlineMedium)
-            InkStatusPill(label = "$bookCount 本馆藏", tone = PillTone.NEUTRAL)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onSyncLocal) { Icon(Icons.Outlined.Sync, contentDescription = "扫描专属目录") }
-            OutlinedButton(onClick = onOpenFileManager) {
-                Icon(Icons.Outlined.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(if (hasCloud) "网盘✓" else "文件/网盘")
-            }
-            Button(onClick = onImportClick, enabled = !isImporting) {
-                if (isImporting) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text("导入")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BookshelfEmptyCard(onImportClick: () -> Unit, onOpenFileManager: () -> Unit) {
-    InkPaperCard(padding = 20.dp) {
-        Icon(Icons.AutoMirrored.Outlined.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Text("本地书架尚无藏书", style = MaterialTheme.typography.titleMedium)
-        Text(
-            text = "采用 Readium 工业级内核渲染 EPUB 2/3（完整支持目录/样式/插图/划词笔记），结合原生流式分页处理超大 TXT / Markdown / HTML，支持从本地专有目录或网盘直接导入同步。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+    editingBook?.let { target ->
+        EditBookInfoDialog(
+            record = target,
+            onSave = { title, author, category ->
+                viewModel.updateBookInfo(target.id, title, author, category)
+                editingBook = null
+            },
+            onDismiss = { editingBook = null }
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onImportClick, modifier = Modifier.weight(1f)) { Text("选择本地书籍") }
-            OutlinedButton(onClick = onOpenFileManager, modifier = Modifier.weight(1f)) { Text("文件与网盘中心") }
-        }
     }
 }

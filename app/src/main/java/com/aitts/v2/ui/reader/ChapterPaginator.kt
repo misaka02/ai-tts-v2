@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.aitts.v2.reader.ChineseScriptConverter
 import com.aitts.v2.reader.model.ChapterContent
 import com.aitts.v2.reader.model.ReaderBlock
 import com.aitts.v2.reader.model.ReaderSettings
@@ -129,11 +130,12 @@ object ChapterPaginator {
                 fontSize = (settings.fontSizeSp * scale).sp,
                 lineHeight = (settings.fontSizeSp * scale * 1.38f).sp
             )
-            val measured = measureText(block.text, style)
+            val text = ChineseScriptConverter.convert(block.text, settings.scriptConvert)
+            val measured = measureText(text, style)
             if (measured.size.height + minKeepWithNextPx > remainingHeight && currentSlices.isNotEmpty()) {
                 flushPage()
             }
-            placeTextSlices(block, block.text, style, prefix = "")
+            placeTextSlices(block, text, style, prefix = "")
         }
 
         private fun placeParagraph(block: ReaderBlock.Paragraph) {
@@ -152,7 +154,8 @@ object ChapterPaginator {
                 lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
                 letterSpacing = settings.letterSpacingEm.em
             )
-            placeTextSlices(block, block.text, style, prefix = indentPrefix)
+            val text = ChineseScriptConverter.convert(block.text, settings.scriptConvert)
+            placeTextSlices(block, text, style, prefix = indentPrefix)
         }
 
         private fun placeTextSlices(

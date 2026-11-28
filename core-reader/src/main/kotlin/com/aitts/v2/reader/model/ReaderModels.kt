@@ -71,7 +71,8 @@ data class BookRecord(
     val highlights: List<BookHighlight> = emptyList(),
     val category: String = "",
     val isPinned: Boolean = false,
-    val sourceSyncKey: String = ""
+    val sourceSyncKey: String = "",
+    val readingTimeMs: Long = 0L
 )
 
 @Serializable

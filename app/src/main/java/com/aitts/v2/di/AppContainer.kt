@@ -27,7 +27,6 @@ import com.aitts.v2.reader.BookLibraryRepository
 import com.aitts.v2.reader.EpubImageLoader
 import com.aitts.v2.reader.GoogleDriveRepository
 import com.aitts.v2.reader.LibrarySyncEngine
-import com.aitts.v2.reader.LocalFontHttpServer
 import com.aitts.v2.reader.LocalSyncFolderManager
 import com.aitts.v2.reader.ReadiumEngine
 import com.aitts.v2.reader.ReaderTtsController
@@ -120,7 +119,6 @@ class AppContainer(context: Context) {
     val bookLibrary = BookLibraryRepository(appContext)
     val bookImportManager = BookImportManager(appContext, bookLibrary)
     val readiumEngine = ReadiumEngine(appContext)
-    val localFontServer = LocalFontHttpServer()
     val googleDriveClient = GoogleDriveClient(httpManager)
     val webDavClient = WebDavClient(httpManager)
     val googleDrive = GoogleDriveRepository(appContext, secretStore, googleDriveClient, bookImportManager)

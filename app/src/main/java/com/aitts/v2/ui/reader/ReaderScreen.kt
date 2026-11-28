@@ -6,30 +6,20 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -43,6 +33,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderReadingMode
@@ -71,6 +62,7 @@ fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     val pageTurnChannel = remember { Channel<Int>(capacity = 4) }
     val pageTurnEvents = remember(pageTurnChannel) { pageTurnChannel.receiveAsFlow() }
+    var edgeBrightnessHud by remember { mutableStateOf<Float?>(null) }
 
     val colors = rememberReaderColors(readerSettings)
     val appDefaultIsDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -128,21 +120,18 @@ fun ReaderScreen(
         val errMsg = state.errorMessage
         when {
             state.isLoading && !ready -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            errMsg != null && !ready -> Column(
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(errMsg, color = colors.text)
-                Button(onClick = onBack) { Text("返回书架") }
-            }
+            errMsg != null && !ready -> ReaderErrorPlaceholder(
+                message = errMsg,
+                textColor = colors.text,
+                onBack = onBack,
+                modifier = Modifier.align(Alignment.Center)
+            )
             book != null && (pub != null || (chapter != null && index != null)) -> {
                 if (pub != null) {
                     ReadiumEpubViewport(
                         bookId = book.id,
                         publication = pub,
                         readiumEngine = viewModel.readiumEngine,
-                        localFontServer = viewModel.localFontServer,
                         initialLocator = state.readiumInitialLocator,
                         readerSettings = readerSettings,
                         colors = colors,
@@ -153,6 +142,8 @@ fun ReaderScreen(
                         totalProgression = state.currentProgression,
                         isTtsActive = activeTtsForBook,
                         activeTtsSentence = if (activeTtsForBook) ttsState.activeSentenceText else "",
+                        autoScrollActive = state.autoScrollActive,
+                        autoScrollPaused = state.autoScrollPaused,
                         pageTurnEvents = pageTurnEvents,
                         goToLocatorEvents = viewModel.goToLocatorEvents,
                         onLocatorChanged = viewModel::onReadiumLocatorChanged,
@@ -161,10 +152,7 @@ fun ReaderScreen(
                         onHighlightTapped = { hid -> viewModel.annotations.handleHighlightAction(tappedId = hid) },
                         onImageTapped = viewModel.media::openImageLightbox,
                         onSpeakSelection = viewModel.ttsSearch::startTtsFromReadium,
-                        onSearchSelection = { q ->
-                            viewModel.openSheet(ReaderSheet.SEARCH)
-                            viewModel.ttsSearch.runBookSearch(q)
-                        }
+                        onSearchSelection = { q -> viewModel.openSheet(ReaderSheet.SEARCH); viewModel.ttsSearch.runBookSearch(q) }
                     )
                 } else if (chapter != null && index != null) {
                     if (readerSettings.readingMode == ReaderReadingMode.PAGED) {
@@ -178,11 +166,13 @@ fun ReaderScreen(
                             pendingScrollBlockIndex = state.pendingScrollBlockIndex,
                             pendingScrollCharOffset = state.pendingScrollCharOffset,
                             pendingLandOnLastPage = state.pendingLandOnLastPage,
+                            autoScrollActive = state.autoScrollActive,
+                            autoScrollPaused = state.autoScrollPaused,
                             pageTurnEvents = pageTurnEvents,
                             onConsumedPendingScroll = viewModel::consumePendingScroll,
                             onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
                             onTapCenter = viewModel::toggleChrome,
-                            onLongPressBlock = { idx, txt -> viewModel.setParagraphMenu(idx to txt) },
+                            onLongPressBlock = { idx, txt -> viewModel.setDialogFlags(paragraph = idx to txt) },
                             onPrevChapter = { landLast -> viewModel.stepChapter(-1, landLast) },
                             onNextChapter = { viewModel.stepChapter(1, false) },
                             loadImage = viewModel::loadBookImage,
@@ -197,10 +187,12 @@ fun ReaderScreen(
                             listState = listState,
                             activeTtsBlockIndex = activeTtsBlock,
                             pendingScrollBlockIndex = state.pendingScrollBlockIndex,
+                            autoScrollActive = state.autoScrollActive,
+                            autoScrollPaused = state.autoScrollPaused,
                             onConsumedPendingScroll = viewModel::consumePendingScroll,
                             onVisibleBlockChanged = viewModel::onVisibleBlockChanged,
                             onTapBody = viewModel::toggleChrome,
-                            onLongPressBlock = { idx, txt -> viewModel.setParagraphMenu(idx to txt) },
+                            onLongPressBlock = { idx, txt -> viewModel.setDialogFlags(paragraph = idx to txt) },
                             onPrevChapter = { viewModel.stepChapter(-1) },
                             onNextChapter = { viewModel.stepChapter(1) },
                             loadImage = viewModel::loadBookImage,
@@ -209,45 +201,74 @@ fun ReaderScreen(
                     }
                 }
 
-                val isNativeScroll = pub == null && readerSettings.readingMode == ReaderReadingMode.SCROLL
-                if (isNativeScroll && showJumpBackChip && chapter != null) {
-                    Surface(
+                val canShowFloatingOverlays = !state.showChrome && state.activeSheet == null
+                if (readerSettings.leftEdgeBrightnessGesture && canShowFloatingOverlays) {
+                    ReaderEdgeBrightnessStrip(
+                        currentBrightness = readerSettings.brightness,
+                        onBrightnessChange = { next -> viewModel.updateReaderSettings { it.copy(brightness = next) } },
+                        onHudChange = { edgeBrightnessHud = it },
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    )
+                }
+
+                edgeBrightnessHud?.let { b ->
+                    ReaderBrightnessHud(brightnessFraction = b, modifier = Modifier.align(Alignment.Center))
+                }
+
+                val showJumpChip = pub == null && readerSettings.readingMode == ReaderReadingMode.SCROLL
+                if (showJumpChip && showJumpBackChip && chapter != null) {
+                    ReaderJumpBackChip(
                         onClick = {
                             coroutineScope.launch {
                                 val pos = chapter.blocks.indexOfFirst { it.index == activeTtsBlock }
                                 if (pos >= 0) listState.animateScrollToItem(pos + 1, scrollOffset = -120)
                             }
                         },
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 92.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Outlined.GraphicEq, contentDescription = null)
-                            Text("回到朗读处", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
+                        modifier = Modifier.align(Alignment.BottomEnd)
+                    )
+                }
+
+                if (state.autoScrollActive && !state.showChrome) {
+                    ReaderAutoScrollOverlay(
+                        speed = readerSettings.autoScrollSpeed,
+                        isPaused = state.autoScrollPaused,
+                        onSpeedDelta = { d -> viewModel.controlAutoScroll(speedDelta = d) },
+                        onTogglePause = { viewModel.controlAutoScroll(paused = !state.autoScrollPaused) },
+                        onStop = { viewModel.controlAutoScroll(active = false, paused = false) },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+                }
+
+                val showMiniTts = activeTtsForBook && !state.showChrome && state.activeSheet == null
+                if (showMiniTts && !state.autoScrollActive) {
+                    ReaderMiniTtsBar(
+                        ttsState = ttsState,
+                        speed = activeProvider.speed,
+                        onCycleSpeed = {
+                            val next = when {
+                                activeProvider.speed < 1.15f -> 1.25f
+                                activeProvider.speed < 1.45f -> 1.50f
+                                activeProvider.speed < 1.85f -> 2.00f
+                                else -> 1.00f
+                            }
+                            viewModel.ttsSearch.updateActiveVoice(speed = next)
+                        },
+                        onOpenConsole = { viewModel.openSheet(ReaderSheet.TTS) },
+                        onStop = viewModel::togglePlayPause,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 34.dp)
+                    )
                 }
 
                 val showCornerMenu = !state.showChrome &&
                     (readerSettings.tapZoneMode == ReaderTapZoneMode.ALL_NEXT ||
                         readerSettings.tapZoneMode == ReaderTapZoneMode.SWIPE_ONLY)
                 if (showCornerMenu) {
-                    Surface(
-                        shape = CircleShape,
-                        color = chromeBg.copy(alpha = 0.78f),
+                    ReaderCornerTuneButton(
+                        chromeBg = chromeBg,
                         contentColor = colors.text,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 36.dp, end = 12.dp)
-                    ) {
-                        IconButton(onClick = viewModel::toggleChrome) {
-                            Icon(Icons.Outlined.Tune, contentDescription = "打开阅读菜单")
-                        }
-                    }
+                        onClick = viewModel::toggleChrome,
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    )
                 }
 
                 val totalChaps = pub?.readingOrder?.size ?: index?.chapters?.size ?: 1
@@ -260,9 +281,7 @@ fun ReaderScreen(
                     val isBookmarked = book.bookmarks.any {
                         if (state.currentLocatorJson.isNotBlank() && it.locatorJson.isNotBlank()) {
                             it.chapterIndex == state.currentChapterIndex && it.locatorJson == state.currentLocatorJson
-                        } else {
-                            it.chapterIndex == state.currentChapterIndex && it.blockIndex == state.visibleBlockIndex
-                        }
+                        } else it.chapterIndex == state.currentChapterIndex && it.blockIndex == state.visibleBlockIndex
                     }
                     ReaderTopBar(
                         bookTitle = book.title,
@@ -272,7 +291,10 @@ fun ReaderScreen(
                         chromeText = colors.text,
                         onBack = onBack,
                         onToggleBookmark = { viewModel.annotations.toggleBookmark() },
-                        onOpenSearch = { viewModel.openSheet(ReaderSheet.SEARCH) }
+                        onOpenSearch = { viewModel.openSheet(ReaderSheet.SEARCH) },
+                        onStartAutoScroll = { viewModel.controlAutoScroll(active = true, paused = false) },
+                        onOpenJump = { viewModel.setDialogFlags(jump = true) },
+                        onOpenBookInfo = { viewModel.setDialogFlags(info = true) }
                     )
                 }
 
@@ -293,8 +315,17 @@ fun ReaderScreen(
                         onPrevChapter = { viewModel.stepChapter(-1) },
                         onNextChapter = { viewModel.stepChapter(1) },
                         onSeekProgression = viewModel::seekByProgression,
+                        onOpenJump = { viewModel.setDialogFlags(jump = true) },
                         onTogglePlay = viewModel::togglePlayPause,
-                        onToggleDayNight = { viewModel.toggleDayNightQuick(appDefaultIsDark) },
+                        onToggleDayNight = {
+                            val curDark = when {
+                                readerSettings.customBgHex != 0L -> ColorUtils.calculateLuminance(readerSettings.customBgHex.toInt()) < 0.45
+                                readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP -> appDefaultIsDark
+                                else -> readerSettings.paperTheme.isDark
+                            }
+                            val next = if (curDark) ReaderPaperTheme.CREAM else ReaderPaperTheme.NIGHT
+                            viewModel.updateReaderSettings { it.copy(paperTheme = next, customBgHex = 0L, customTextHex = 0L) }
+                        },
                         onOpenToc = { viewModel.openSheet(ReaderSheet.TOC) },
                         onOpenAppearance = { viewModel.openSheet(ReaderSheet.APPEARANCE) },
                         onOpenTtsSheet = { viewModel.openSheet(ReaderSheet.TTS) }

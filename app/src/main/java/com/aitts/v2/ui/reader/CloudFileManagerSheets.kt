@@ -105,11 +105,16 @@ fun GoogleDriveAuthCard(
     errorMessage: String?,
     isBusy: Boolean,
     isBrowserWaiting: Boolean,
+    pendingAuthUrl: String,
+    pastedCallbackUrl: String,
     packageName: String,
     signingSha1: String,
     onUpdateClient: (String?, String?) -> Unit,
+    onUpdatePastedUrl: (String) -> Unit,
     onImportJson: () -> Unit,
     onBrowserSignIn: () -> Unit,
+    onCopyAuthUrl: () -> Unit,
+    onSubmitManualCallback: () -> Unit,
     onCancelBrowserSignIn: () -> Unit,
     onOneTapSignIn: () -> Unit,
     onCopySigningInfo: () -> Unit,
@@ -163,8 +168,21 @@ fun GoogleDriveAuthCard(
         }
 
         if (isBrowserWaiting) {
-            OutlinedButton(onClick = onCancelBrowserSignIn, modifier = Modifier.fillMaxWidth()) {
-                Text("取消等待浏览器回调")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (pendingAuthUrl.isNotBlank()) {
+                        OutlinedButton(onClick = onCopyAuthUrl, modifier = Modifier.weight(1f)) { Text("复制授权链接") }
+                    }
+                    OutlinedButton(onClick = onCancelBrowserSignIn, modifier = Modifier.weight(1f)) { Text("取消等待") }
+                }
+                OutlinedTextField(
+                    value = pastedCallbackUrl,
+                    onValueChange = onUpdatePastedUrl,
+                    label = { Text("若浏览器未自动跳回，粘贴跳转后的回调地址") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(onClick = onSubmitManualCallback, modifier = Modifier.fillMaxWidth()) { Text("提交回调 URL 完成登录") }
             }
         } else {
             Button(onClick = onBrowserSignIn, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {

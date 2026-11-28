@@ -2,6 +2,7 @@ package com.aitts.v2.reader
 
 import com.aitts.v2.engine.cloud.GoogleDriveAuthConfig
 import com.aitts.v2.engine.cloud.GoogleDriveClient
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -14,21 +15,36 @@ import java.net.URLDecoder
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Fallback developer loopback OAuth 2.0 PKCE helper for environments without Google Play Services.
+ * Browser loopback OAuth 2.0 PKCE helper with manual callback URL fallback
+ * for environments where OEM browsers block localhost loopback redirects.
  */
 internal class GoogleDriveLoopbackAuth(private val driveClient: GoogleDriveClient) {
 
     @Volatile
     private var activeSocket: ServerSocket? = null
-    private val generationCounter = AtomicLong(0L)
 
-    fun currentGeneration(): Long = generationCounter.get()
+    @Volatile
+    private var pendingDeferred: CompletableDeferred<Map<String, String>>? = null
+    private val generationCounter = AtomicLong(0L)
 
     fun cancelPending() {
         generationCounter.incrementAndGet()
+        pendingDeferred?.cancel()
+        pendingDeferred = null
         val socket = activeSocket
         activeSocket = null
         runCatching { socket?.close() }
+    }
+
+    fun completeManuallyFromUrl(pastedUrl: String): Boolean {
+        val deferred = pendingDeferred ?: return false
+        val query = pastedUrl.trim().substringAfter('?', "")
+        if (query.isBlank()) return false
+        val params = runCatching { parseQuery(query) }.getOrDefault(emptyMap())
+        if (!params.containsKey("state") || (!params.containsKey("code") && !params.containsKey("error"))) {
+            return false
+        }
+        return deferred.complete(params)
     }
 
     suspend fun authorizeInBrowser(
@@ -42,6 +58,8 @@ internal class GoogleDriveLoopbackAuth(private val driveClient: GoogleDriveClien
         cancelPending()
         val gen = generationCounter.incrementAndGet()
         val pkce = driveClient.generatePkce()
+        val deferred = CompletableDeferred<Map<String, String>>()
+        pendingDeferred = deferred
         var server: ServerSocket? = null
         try {
             server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).apply {
@@ -52,7 +70,20 @@ internal class GoogleDriveLoopbackAuth(private val driveClient: GoogleDriveClien
             val authUrl = driveClient.buildAuthorizationUrl(cleanId, redirectUri, pkce)
             withContext(Dispatchers.Main) { onLaunchUrl(authUrl) }
 
-            val params = awaitCallback(server)
+            val acceptServer = server
+            val acceptThread = Thread {
+                runCatching {
+                    val found = awaitCallback(acceptServer, deferred)
+                    if (found != null) deferred.complete(found)
+                }.onFailure { err ->
+                    if (!deferred.isCompleted) deferred.completeExceptionally(err)
+                }
+            }.apply { isDaemon = true; start() }
+
+            val params = deferred.await()
+            runCatching { acceptServer.close() }
+            runCatching { acceptThread.join(300L) }
+
             if (gen != generationCounter.get()) throw IOException("登录请求已取消")
             val err = params["error"]
             if (!err.isNullOrBlank()) throw IOException("Google 拒绝授权: $err")
@@ -72,14 +103,18 @@ internal class GoogleDriveLoopbackAuth(private val driveClient: GoogleDriveClien
         } catch (t: Throwable) {
             Result.failure(t)
         } finally {
+            if (pendingDeferred === deferred) pendingDeferred = null
             if (activeSocket === server) activeSocket = null
             runCatching { server?.close() }
         }
     }
 
-    private fun awaitCallback(server: ServerSocket): Map<String, String> {
+    private fun awaitCallback(
+        server: ServerSocket,
+        deferred: CompletableDeferred<Map<String, String>>
+    ): Map<String, String>? {
         val deadline = System.currentTimeMillis() + AUTH_TIMEOUT_MS
-        while (true) {
+        while (!deferred.isCompleted && !server.isClosed) {
             val remaining = (deadline - System.currentTimeMillis()).toInt()
             if (remaining <= 0) throw SocketTimeoutException("Google 授权回调等待超时")
             server.soTimeout = remaining
@@ -101,16 +136,19 @@ internal class GoogleDriveLoopbackAuth(private val driveClient: GoogleDriveClien
                 return params
             }
         }
+        return null
     }
 
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
-        return query.split('&').mapNotNull { pair ->
-            val idx = pair.indexOf('=')
-            if (idx <= 0) return@mapNotNull null
-            URLDecoder.decode(pair.substring(0, idx), Charsets.UTF_8.name()) to
-                URLDecoder.decode(pair.substring(idx + 1), Charsets.UTF_8.name())
-        }.toMap()
+        return runCatching {
+            query.split('&').mapNotNull { pair ->
+                val idx = pair.indexOf('=')
+                if (idx <= 0) return@mapNotNull null
+                URLDecoder.decode(pair.substring(0, idx), Charsets.UTF_8.name()) to
+                    URLDecoder.decode(pair.substring(idx + 1), Charsets.UTF_8.name())
+            }.toMap()
+        }.getOrDefault(emptyMap())
     }
 
     private fun writeHtml(client: java.net.Socket, status: String, bodyHtml: String) {

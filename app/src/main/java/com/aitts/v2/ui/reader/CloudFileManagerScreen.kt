@@ -74,7 +74,7 @@ fun CloudFileManagerScreen(
     var showSortMenu by remember { mutableStateOf(false) }
 
     val authLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
-        if (activity != null) viewModel.auth.handleGoogleAuthResult(activity, res.resultCode, res.data)
+        if (activity != null) viewModel.auth.handleGoogleAuthResult(activity, res.data)
     }
     val jsonPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.auth.importClientSecretJson(context, it) }
@@ -160,11 +160,16 @@ fun CloudFileManagerScreen(
                                 errorMessage = state.errorMessage,
                                 isBusy = state.isBusy,
                                 isBrowserWaiting = state.isBrowserAuthWaiting,
+                                pendingAuthUrl = state.pendingAuthUrl,
+                                pastedCallbackUrl = state.pastedCallbackUrl,
                                 packageName = pkgName,
                                 signingSha1 = sha1,
                                 onUpdateClient = { id, sec -> viewModel.auth.updateDevInputs(cid = id, sec = sec) },
+                                onUpdatePastedUrl = { pasted -> viewModel.auth.updateDevInputs(pastedUrl = pasted) },
                                 onImportJson = { jsonPicker.launch(arrayOf("application/json", "*/*")) },
                                 onBrowserSignIn = { viewModel.auth.startBrowserPkceGoogleAuth(context) },
+                                onCopyAuthUrl = { viewModel.auth.copyPendingAuthUrl(context) },
+                                onSubmitManualCallback = viewModel.auth::submitManualCallbackUrl,
                                 onCancelBrowserSignIn = viewModel.auth::cancelBrowserPkceAuth,
                                 onOneTapSignIn = {
                                     if (activity != null) {

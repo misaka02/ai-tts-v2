@@ -3,6 +3,7 @@ package com.aitts.v2.ui.reader
 import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.outlined.Brightness4
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FormatSize
 import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -73,8 +77,13 @@ fun ReaderTopBar(
     onBack: () -> Unit,
     onToggleBookmark: () -> Unit,
     onOpenSearch: () -> Unit,
+    onStartAutoScroll: () -> Unit,
+    onOpenJump: () -> Unit,
+    onOpenBookInfo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showMore by remember { mutableStateOf(false) }
+
     Surface(color = chromeBg, contentColor = chromeText, tonalElevation = 2.dp, modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
             Row(
@@ -94,15 +103,21 @@ fun ReaderTopBar(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(onClick = onOpenSearch) {
-                    Icon(Icons.Outlined.Search, contentDescription = "全书检索")
-                }
+                IconButton(onClick = onOpenSearch) { Icon(Icons.Outlined.Search, contentDescription = "全书检索") }
                 IconButton(onClick = onToggleBookmark) {
                     Icon(
                         imageVector = if (isBookmarked) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder,
                         contentDescription = "书签",
                         tint = if (isBookmarked) MaterialTheme.colorScheme.primary else chromeText
                     )
+                }
+                Box {
+                    IconButton(onClick = { showMore = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "更多功能") }
+                    DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                        DropdownMenuItem(text = { Text("自动滚屏/翻页阅读") }, onClick = { showMore = false; onStartAutoScroll() })
+                        DropdownMenuItem(text = { Text("精确跳转章节/进度") }, onClick = { showMore = false; onOpenJump() })
+                        DropdownMenuItem(text = { Text("书籍信息与导出笔记") }, onClick = { showMore = false; onOpenBookInfo() })
+                    }
                 }
             }
             HorizontalDivider(color = chromeText.copy(alpha = 0.14f))
@@ -122,6 +137,7 @@ fun ReaderBottomBar(
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
     onSeekProgression: (Float) -> Unit,
+    onOpenJump: () -> Unit,
     onTogglePlay: () -> Unit,
     onToggleDayNight: () -> Unit,
     onOpenToc: () -> Unit,
@@ -150,10 +166,11 @@ fun ReaderBottomBar(
                         text = if (dragging) {
                             "跳转至约第 $previewChapter / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
                         } else {
-                            "第 ${chapterIndex + 1} / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}%"
+                            "第 ${chapterIndex + 1} / ${totalChapters.coerceAtLeast(1)} 章 · ${(displayFraction * 100).toInt()}% (点击精跳)"
                         },
                         style = MaterialTheme.typography.labelSmall,
-                        color = chromeText.copy(alpha = 0.8f)
+                        color = chromeText.copy(alpha = 0.85f),
+                        modifier = Modifier.clickable(onClick = onOpenJump)
                     )
                     Slider(
                         value = displayFraction,

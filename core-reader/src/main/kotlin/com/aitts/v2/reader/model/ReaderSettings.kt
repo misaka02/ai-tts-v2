@@ -70,6 +70,26 @@ enum class ReaderTapZoneMode(val displayName: String) {
 }
 
 @Serializable
+enum class ReaderOrientationLock(val displayName: String) {
+    SYSTEM("跟随系统"),
+    PORTRAIT("锁定竖屏"),
+    LANDSCAPE("锁定横屏")
+}
+
+@Serializable
+enum class ReaderScriptConvert(val displayName: String, val code: Int) {
+    NONE("原文字形", 0),
+    TO_SIMPLIFIED("转简体中文", 1),
+    TO_TRADITIONAL("转繁体中文", 2)
+}
+
+@Serializable
+enum class ReaderPageAnimation(val displayName: String) {
+    SLIDE("平滑翻页"),
+    NONE("无动画直切")
+}
+
+@Serializable
 data class ReaderSettings(
     val paperTheme: ReaderPaperTheme = ReaderPaperTheme.CREAM,
     val fontSizeSp: Float = 18f,
@@ -105,7 +125,12 @@ data class ReaderSettings(
     val showFooterBar: Boolean = true,
     val showBatteryTime: Boolean = true,
     val customBgHex: Long = 0L,
-    val customTextHex: Long = 0L
+    val customTextHex: Long = 0L,
+    val orientationLock: ReaderOrientationLock = ReaderOrientationLock.SYSTEM,
+    val scriptConvert: ReaderScriptConvert = ReaderScriptConvert.NONE,
+    val pageAnimation: ReaderPageAnimation = ReaderPageAnimation.SLIDE,
+    val leftEdgeBrightnessGesture: Boolean = true,
+    val autoScrollSpeed: Int = 4
 ) {
     fun effectiveIndentEm(): Float = when {
         paragraphIndentEm >= 0f -> paragraphIndentEm

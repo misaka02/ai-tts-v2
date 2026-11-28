@@ -31,9 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.aitts.v2.reader.ChineseScriptConverter
 import com.aitts.v2.reader.model.ChapterContent
 import com.aitts.v2.reader.model.ReaderBlock
 import com.aitts.v2.reader.model.ReaderSettings
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -45,6 +47,8 @@ fun ReaderContentViewport(
     listState: LazyListState,
     activeTtsBlockIndex: Int,
     pendingScrollBlockIndex: Int?,
+    autoScrollActive: Boolean = false,
+    autoScrollPaused: Boolean = false,
     onConsumedPendingScroll: () -> Unit,
     onVisibleBlockChanged: (Int, Int) -> Unit,
     onTapBody: () -> Unit,
@@ -86,6 +90,15 @@ fun ReaderContentViewport(
     val vertPadDp = readerSettings.verticalPaddingDp.coerceIn(4f, 40f)
     val indentEm = readerSettings.effectiveIndentEm()
 
+    LaunchedEffect(autoScrollActive, autoScrollPaused, readerSettings.autoScrollSpeed, chapter.chapterIndex) {
+        if (!autoScrollActive || autoScrollPaused) return@LaunchedEffect
+        val stepPx = (readerSettings.autoScrollSpeed.coerceIn(1, 10) + 1) * 1.4f
+        while (true) {
+            delay(45L)
+            listState.dispatchRawDelta(stepPx)
+        }
+    }
+
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -121,8 +134,11 @@ fun ReaderContentViewport(
                 else -> ""
             }
             val displayText = when (block) {
-                is ReaderBlock.Heading -> block.text
-                is ReaderBlock.Paragraph -> if (!block.isQuote) indentPrefix + block.text else block.text
+                is ReaderBlock.Heading -> ChineseScriptConverter.convert(block.text, readerSettings.scriptConvert)
+                is ReaderBlock.Paragraph -> {
+                    val txt = ChineseScriptConverter.convert(block.text, readerSettings.scriptConvert)
+                    if (!block.isQuote) indentPrefix + txt else txt
+                }
                 else -> ""
             }
             ReaderBlockItemView(

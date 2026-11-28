@@ -73,6 +73,8 @@ class GoogleDriveRepository(
 
     fun cancelPendingAuth() = loopbackAuth.cancelPending()
 
+    fun completeManualBrowserCallback(pastedUrl: String): Boolean = loopbackAuth.completeManuallyFromUrl(pastedUrl)
+
     suspend fun connectWithTokens(
         clientId: String,
         clientSecret: String,

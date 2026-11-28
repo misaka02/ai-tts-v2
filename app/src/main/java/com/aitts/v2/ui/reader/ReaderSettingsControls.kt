@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -24,6 +23,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +47,9 @@ fun StepperSliderRow(
     step: Float,
     onValueChange: (Float) -> Unit
 ) {
+    var draft by remember(value) { mutableFloatStateOf(value.coerceIn(valueRange.start, valueRange.endInclusive)) }
+    var lastEmitMs by remember { mutableLongStateOf(0L) }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -63,19 +70,35 @@ fun StepperSliderRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             IconButton(
-                onClick = { onValueChange((value - step).coerceIn(valueRange.start, valueRange.endInclusive)) },
+                onClick = {
+                    val next = (draft - step).coerceIn(valueRange.start, valueRange.endInclusive)
+                    draft = next
+                    onValueChange(next)
+                },
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(Icons.Outlined.Remove, contentDescription = "减少 $label", modifier = Modifier.size(16.dp))
             }
             Slider(
-                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
-                onValueChange = onValueChange,
+                value = draft,
+                onValueChange = { raw ->
+                    draft = raw
+                    val now = System.currentTimeMillis()
+                    if (now - lastEmitMs >= 95L) {
+                        lastEmitMs = now
+                        onValueChange(raw)
+                    }
+                },
+                onValueChangeFinished = { onValueChange(draft) },
                 valueRange = valueRange,
                 modifier = Modifier.weight(1f)
             )
             IconButton(
-                onClick = { onValueChange((value + step).coerceIn(valueRange.start, valueRange.endInclusive)) },
+                onClick = {
+                    val next = (draft + step).coerceIn(valueRange.start, valueRange.endInclusive)
+                    draft = next
+                    onValueChange(next)
+                },
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(Icons.Outlined.Add, contentDescription = "增加 $label", modifier = Modifier.size(16.dp))
@@ -133,6 +156,7 @@ private data class CustomSwatchPreset(val label: String, val bgHex: Long, val te
 
 private val CURATED_SWATCHES = listOf(
     CustomSwatchPreset("暖杏茶", 0xFFF3E6D0L, 0xFF33261BL),
+    CustomSwatchPreset("豆沙绿", 0xFFCDE5D0L, 0xFF1A2D1FL),
     CustomSwatchPreset("墨绿林", 0xFF16241DL, 0xFFD2E2D8L),
     CustomSwatchPreset("深海夜", 0xFF111B27L, 0xFFD4E0EDL)
 )

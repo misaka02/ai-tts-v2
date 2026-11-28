@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import com.aitts.v2.di.AppContainer
+import com.aitts.v2.reader.BookNotesExporter
 import com.aitts.v2.reader.addHighlight
 import com.aitts.v2.reader.model.BookHighlight
 import com.aitts.v2.reader.removeHighlight
@@ -14,7 +15,7 @@ import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 /**
- * Coordinates bookmarks, EPUB highlights, notes, and plain-text copy for ReaderViewModel.
+ * Coordinates bookmarks, EPUB highlights, notes, Markdown note export, and plain-text copy.
  */
 internal class ReaderAnnotationHelper(
     private val container: AppContainer,
@@ -92,5 +93,18 @@ internal class ReaderAnnotationHelper(
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("摘录", text))
         state.update { it.copy(statusMessage = "已复制到剪贴板") }
+    }
+
+    fun exportNotesToClipboard(context: Context) {
+        val book = state.value.book ?: return
+        BookNotesExporter.copyMarkdown(context, book)
+        state.update { it.copy(statusMessage = "已复制《${book.title}》Markdown 笔记") }
+    }
+
+    fun shareNotes(context: Context) {
+        val book = state.value.book ?: return
+        val intent = BookNotesExporter.buildShareIntent(book)
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
     }
 }

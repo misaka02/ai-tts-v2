@@ -95,7 +95,7 @@ fun AiTtsAppRoot(container: AppContainer) {
 
     LaunchedEffect(container) {
         container.incomingBookUriEvents.collect { uri ->
-            bookshelfVm.importBook(uri) { importedId ->
+            bookshelfVm.importBooks(listOf(uri)) { importedId ->
                 navController.navigate("reader/$importedId") { launchSingleTop = true }
             }
         }

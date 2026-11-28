@@ -4,7 +4,10 @@ import com.aitts.v2.reader.model.ReaderColumnCount
 import com.aitts.v2.reader.model.ReaderDirection
 import com.aitts.v2.reader.model.ReaderFontFamily
 import com.aitts.v2.reader.model.ReaderImageFilter
+import com.aitts.v2.reader.model.ReaderOrientationLock
+import com.aitts.v2.reader.model.ReaderPageAnimation
 import com.aitts.v2.reader.model.ReaderPaperTheme
+import com.aitts.v2.reader.model.ReaderScriptConvert
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.model.ReaderTapZoneMode
 import com.aitts.v2.reader.model.ReaderTextAlign
@@ -30,6 +33,10 @@ class ReaderSettingsCompatibilityTest {
         assertEquals(400, decoded.fontWeight)
         assertEquals(16f, decoded.verticalPaddingDp)
         assertEquals(ReaderTapZoneMode.STANDARD, decoded.tapZoneMode)
+        assertEquals(ReaderOrientationLock.SYSTEM, decoded.orientationLock)
+        assertEquals(ReaderScriptConvert.NONE, decoded.scriptConvert)
+        assertEquals(ReaderPageAnimation.SLIDE, decoded.pageAnimation)
+        assertTrue(decoded.leftEdgeBrightnessGesture)
         assertTrue(decoded.showHeaderBar)
         assertTrue(decoded.showFooterBar)
     }
@@ -67,7 +74,12 @@ class ReaderSettingsCompatibilityTest {
             showFooterBar = true,
             showBatteryTime = false,
             customBgHex = 0xFF111B27L,
-            customTextHex = 0xFFD4E0EDL
+            customTextHex = 0xFFD4E0EDL,
+            orientationLock = ReaderOrientationLock.PORTRAIT,
+            scriptConvert = ReaderScriptConvert.TO_SIMPLIFIED,
+            pageAnimation = ReaderPageAnimation.NONE,
+            leftEdgeBrightnessGesture = false,
+            autoScrollSpeed = 7
         )
         val encoded = json.encodeToString(full)
         val restored = json.decodeFromString<ReaderSettings>(encoded)

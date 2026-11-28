@@ -45,6 +45,21 @@ fun BookLibraryRepository.updateCategory(bookId: String, category: String) {
     mutateBook(bookId) { book -> book.copy(category = category.trim()) }
 }
 
+fun BookLibraryRepository.updateBookMetadata(bookId: String, title: String, author: String, category: String) {
+    mutateBook(bookId) { book ->
+        book.copy(
+            title = title.trim().ifBlank { book.title },
+            author = author.trim(),
+            category = category.trim()
+        )
+    }
+}
+
+fun BookLibraryRepository.addReadingTime(bookId: String, deltaMs: Long) {
+    if (deltaMs <= 0L) return
+    mutateBook(bookId) { book -> book.copy(readingTimeMs = book.readingTimeMs + deltaMs) }
+}
+
 fun BookLibraryRepository.importCustomFont(uri: Uri): Result<String> = runCatching {
     val fontsDir = File(rootDir, "fonts").apply { mkdirs() }
     val rawName = runCatching {

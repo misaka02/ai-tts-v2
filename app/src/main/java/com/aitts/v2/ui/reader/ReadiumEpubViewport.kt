@@ -29,10 +29,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
-import com.aitts.v2.reader.LocalFontHttpServer
+import com.aitts.v2.reader.ReadiumCssOverrideInjector
 import com.aitts.v2.reader.ReadiumEngine
 import com.aitts.v2.reader.model.BookHighlight
+import com.aitts.v2.reader.model.ReaderPageAnimation
+import com.aitts.v2.reader.model.ReaderReadingMode
 import com.aitts.v2.reader.model.ReaderSettings
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import org.readium.r2.navigator.DecorableNavigator
@@ -41,23 +44,19 @@ import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.navigator.input.TapEvent
-import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
-import org.readium.r2.shared.util.Url
-
-private const val CUSTOM_FONT_FAMILY = "AiTtsCustomFont"
+import java.io.File
 
 /**
- * Hosts Readium 3.0.0 `EpubNavigatorFragment` inside Compose for EPUB 2/3 rendering,
- * custom font injection, image tap bridge, interactive highlights, configurable tap zones, and running bars.
+ * Hosts Readium 3.0.0 `EpubNavigatorFragment` inside Compose with CSS/FontFace override injection,
+ * multi-chapter JS image tap bridge, interactive highlights, auto-scroll, and running bars.
  */
 @Composable
 fun ReadiumEpubViewport(
     bookId: String,
     publication: Publication,
     readiumEngine: ReadiumEngine,
-    localFontServer: LocalFontHttpServer,
     initialLocator: Locator?,
     readerSettings: ReaderSettings,
     colors: ResolvedReaderColors,
@@ -68,6 +67,8 @@ fun ReadiumEpubViewport(
     totalProgression: Float,
     isTtsActive: Boolean,
     activeTtsSentence: String,
+    autoScrollActive: Boolean,
+    autoScrollPaused: Boolean,
     pageTurnEvents: Flow<Int>,
     goToLocatorEvents: Flow<Locator>,
     onLocatorChanged: (chapterIdx: Int, locatorJson: String, totalProg: Float, title: String, posIdx: Int) -> Unit,
@@ -88,6 +89,7 @@ fun ReadiumEpubViewport(
     val appTextArgb = MaterialTheme.colorScheme.onBackground.toArgb()
 
     val currentSettings by rememberUpdatedState(readerSettings)
+    val currentColors by rememberUpdatedState(colors)
     val currentTapCenter by rememberUpdatedState(onTapCenter)
     val currentLocatorCb by rememberUpdatedState(onLocatorChanged)
     val currentCreateHighlight by rememberUpdatedState(onCreateHighlight)
@@ -96,21 +98,41 @@ fun ReadiumEpubViewport(
     val currentSpeakSelection by rememberUpdatedState(onSpeakSelection)
     val currentSearchSelection by rememberUpdatedState(onSearchSelection)
 
-    val customFontUrl = remember(readerSettings.customFontPath) {
-        localFontServer.serveFont(readerSettings.customFontPath)
-    }
     var navigatorRef by remember(bookId, publication) { mutableStateOf<EpubNavigatorFragment?>(null) }
     var containerViewRef by remember(bookId, publication) { mutableStateOf<FragmentContainerView?>(null) }
     var latestLocator by remember(bookId, publication) { mutableStateOf(initialLocator) }
+    var currentHref by remember(bookId, publication) { mutableStateOf("") }
 
-    val prefs = remember(readerSettings, appIsDark, appBgArgb, appTextArgb, customFontUrl) {
-        readiumEngine.buildPreferences(
-            settings = readerSettings,
-            appIsDark = appIsDark,
-            appBgArgb = appBgArgb,
-            appTextArgb = appTextArgb,
-            customFontFamilyName = if (customFontUrl != null) CUSTOM_FONT_FAMILY else null
+    var debouncedSettings by remember { mutableStateOf(readerSettings) }
+    LaunchedEffect(readerSettings) {
+        delay(90L)
+        debouncedSettings = readerSettings
+    }
+
+    val prefs = remember(debouncedSettings, appIsDark, appBgArgb, appTextArgb) {
+        readiumEngine.buildPreferences(debouncedSettings, appIsDark, appBgArgb, appTextArgb)
+    }
+
+    fun buildRuntimeJs(st: ReaderSettings, cl: ResolvedReaderColors): String {
+        val customPath = st.customFontPath.trim()
+        val hasCustom = customPath.isNotBlank() && File(customPath).isFile
+        val css = ReadiumCssOverrideInjector.buildOverrideCss(
+            settings = st,
+            resolvedTextHex = toHexRgb(cl.text.toArgb()),
+            resolvedBgHex = toHexRgb(cl.background.toArgb()),
+            hasCustomFont = hasCustom
         )
+        return ReadiumCssOverrideInjector.buildInjectScript(
+            css = css,
+            hasCustomFont = hasCustom,
+            fontToken = customPath,
+            scriptConvertMode = st.scriptConvert.code
+        )
+    }
+
+    suspend fun syncWebView(nav: EpubNavigatorFragment) {
+        runCatching { nav.evaluateJavascript(IMAGE_TAP_JS) }
+        runCatching { nav.evaluateJavascript(buildRuntimeJs(currentSettings, currentColors)) }
     }
 
     Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
@@ -141,7 +163,7 @@ fun ReadiumEpubViewport(
         }
     }
 
-    DisposableEffect(bookId, publication, containerViewRef, customFontUrl) {
+    DisposableEffect(bookId, publication, containerViewRef) {
         val hostView = containerViewRef ?: return@DisposableEffect onDispose {}
         val fm = activity.supportFragmentManager
         val fragmentTag = "readium_epub_$bookId"
@@ -160,25 +182,24 @@ fun ReadiumEpubViewport(
             selectionActionModeCallback = selectionCallback,
             shouldApplyInsetsPadding = false
         ).apply {
-            if (customFontUrl != null) {
-                Url(customFontUrl)?.let { parsedUrl ->
-                    addFontFamilyDeclaration(FontFamily(CUSTOM_FONT_FAMILY)) { addFontFace { addSource(parsedUrl) } }
-                }
-            }
-            registerJavascriptInterface("AiTtsImageBridge") { link ->
-                ReadiumImageBridge(link.href.toString()) { resolved -> mainHandler.post { currentImageTap(resolved) } }
+            registerJavascriptInterface("AiTtsReaderBridge") { link ->
+                ReadiumJsBridge(
+                    baseHref = link.href.toString(),
+                    customFontPathProvider = { currentSettings.customFontPath },
+                    onImageResolved = { resolved -> mainHandler.post { currentImageTap(resolved) } }
+                )
             }
         }
 
         val paginationListener = object : EpubNavigatorFragment.PaginationListener {
             override fun onPageLoaded() {
-                scope.launch { runCatching { navigatorHolder[0]?.evaluateJavascript(IMAGE_TAP_JS) } }
+                navigatorHolder[0]?.let { nav -> scope.launch { syncWebView(nav) } }
             }
 
             override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) = Unit
         }
 
-        val startLoc = navigatorRef?.currentLocator?.value ?: latestLocator ?: initialLocator
+        val startLoc = latestLocator ?: initialLocator
         val fragFactory = EpubNavigatorFactory(publication).createFragmentFactory(
             initialLocator = startLoc,
             initialPreferences = prefs,
@@ -197,7 +218,7 @@ fun ReadiumEpubViewport(
         frag.addInputListener(object : InputListener {
             override fun onTap(event: TapEvent): Boolean {
                 val width = hostView.width.takeIf { it > 0 } ?: return false
-                return handleEpubTapZone(currentSettings.tapZoneMode, event.point.x / width.toFloat(), frag) { currentTapCenter() }
+                return handleEpubTapZone(currentSettings, event.point.x / width.toFloat(), frag) { currentTapCenter() }
             }
         })
         frag.addDecorationListener(
@@ -219,12 +240,24 @@ fun ReadiumEpubViewport(
         }
     }
 
-    LaunchedEffect(navigatorRef, prefs) { navigatorRef?.submitPreferences(prefs) }
+    LaunchedEffect(navigatorRef, prefs) {
+        val nav = navigatorRef ?: return@LaunchedEffect
+        nav.submitPreferences(prefs)
+        delay(80L)
+        syncWebView(nav)
+    }
+
+    LaunchedEffect(navigatorRef, debouncedSettings, colors, currentHref) {
+        val nav = navigatorRef ?: return@LaunchedEffect
+        delay(40L)
+        syncWebView(nav)
+    }
 
     LaunchedEffect(navigatorRef) {
         val nav = navigatorRef ?: return@LaunchedEffect
         nav.currentLocator.collect { loc ->
             latestLocator = loc
+            currentHref = loc.href.toString().substringBefore('#')
             val chapIdx = readiumEngine.resolveChapterIndex(publication, loc)
             val totalProg = (loc.locations.totalProgression ?: 0.0).toFloat()
             val posIdx = loc.locations.position ?: 0
@@ -261,13 +294,35 @@ fun ReadiumEpubViewport(
         }
     }
 
+    LaunchedEffect(navigatorRef, autoScrollActive, autoScrollPaused, readerSettings.autoScrollSpeed, readerSettings.readingMode) {
+        val nav = navigatorRef ?: return@LaunchedEffect
+        if (!autoScrollActive || autoScrollPaused) return@LaunchedEffect
+        val spd = readerSettings.autoScrollSpeed.coerceIn(1, 10)
+        while (true) {
+            if (readerSettings.readingMode == ReaderReadingMode.SCROLL) {
+                delay(45L)
+                runCatching { nav.evaluateJavascript("window.scrollBy(0, ${spd + 1});") }
+            } else {
+                val intervalMs = (14_000L - spd * 1100L).coerceIn(2500L, 13_000L)
+                delay(intervalMs)
+                val anim = readerSettings.pageAnimation == ReaderPageAnimation.SLIDE
+                nav.goForward(animated = anim)
+            }
+        }
+    }
+
     LaunchedEffect(navigatorRef, pageTurnEvents) {
         val nav = navigatorRef ?: return@LaunchedEffect
-        pageTurnEvents.collect { delta -> if (delta < 0) nav.goBackward(animated = true) else nav.goForward(animated = true) }
+        pageTurnEvents.collect { delta ->
+            val anim = currentSettings.pageAnimation == ReaderPageAnimation.SLIDE
+            if (delta < 0) nav.goBackward(animated = anim) else nav.goForward(animated = anim)
+        }
     }
 
     LaunchedEffect(navigatorRef, goToLocatorEvents) {
         val nav = navigatorRef ?: return@LaunchedEffect
-        goToLocatorEvents.collect { loc -> nav.go(loc, animated = true) }
+        goToLocatorEvents.collect { loc ->
+            nav.go(loc, animated = currentSettings.pageAnimation == ReaderPageAnimation.SLIDE)
+        }
     }
 }

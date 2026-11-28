@@ -33,8 +33,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.aitts.v2.reader.model.ChapterContent
+import com.aitts.v2.reader.model.ReaderPageAnimation
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.model.ReaderTapZoneMode
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -54,6 +56,8 @@ fun PagedReaderViewport(
     pendingScrollBlockIndex: Int?,
     pendingScrollCharOffset: Int = 0,
     pendingLandOnLastPage: Boolean,
+    autoScrollActive: Boolean = false,
+    autoScrollPaused: Boolean = false,
     pageTurnEvents: Flow<Int>,
     onConsumedPendingScroll: () -> Unit,
     onVisibleBlockChanged: (Int, Int) -> Unit,
@@ -165,14 +169,27 @@ fun PagedReaderViewport(
             fun turnPage(delta: Int) {
                 val curReal = pagerState.currentPage - pageOffset
                 val targetReal = curReal + delta
+                val anim = readerSettings.pageAnimation == ReaderPageAnimation.SLIDE
                 when {
                     targetReal < 0 && hasPrev -> onPrevChapter(true)
                     targetReal >= pages.size && hasNext -> onNextChapter()
-                    targetReal in pages.indices -> coroutineScope.launch { pagerState.animateScrollToPage(pageOffset + targetReal) }
+                    targetReal in pages.indices -> coroutineScope.launch {
+                        if (anim) pagerState.animateScrollToPage(pageOffset + targetReal)
+                        else pagerState.scrollToPage(pageOffset + targetReal)
+                    }
                 }
             }
 
             LaunchedEffect(pageTurnEvents, pages.size) { pageTurnEvents.collect { delta -> turnPage(delta) } }
+
+            LaunchedEffect(autoScrollActive, autoScrollPaused, readerSettings.autoScrollSpeed, pages.size) {
+                if (!autoScrollActive || autoScrollPaused) return@LaunchedEffect
+                val intervalMs = (14_000L - readerSettings.autoScrollSpeed.coerceIn(1, 10) * 1100L).coerceIn(2500L, 13_000L)
+                while (true) {
+                    delay(intervalMs)
+                    turnPage(1)
+                }
+            }
 
             val currentRealPage = (pagerState.currentPage - pageOffset).coerceIn(0, pages.lastIndex)
 

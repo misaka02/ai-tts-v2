@@ -264,3 +264,44 @@
      - `cloud` R8 APK：`6,550,148` 字节（SHA-256 `D509DA412FB71E9C126DCA16D507EC29A4D37F4033A7DC2B318B3B981CD30148`，`apksigner` 退出码 `0`）。
      - `full` R8 APK：`30,241,150` 字节（SHA-256 `1FB8C612AA43E4D28FC9C764FBE19442612D29DDE6CF216E7983CA7E4F66C8E4`，`apksigner` 退出码 `0`）。
    - 删除旧预发布 `v2.3.0-pre.1`，发布唯一最新预发布 **`v2.4.0-pre.1`** 随附双 R8 签名 APK。
+
+
+---
+
+## 13. v2.5.0-pre.1 Readium CSS/字体强注打通、零卡顿悬浮设置、阅读工具全集与 Play OAuth 真实诊断
+
+针对 `v2.4.0-pre.1` 用户实测反馈（排版设置很多未实际生效或拖动卡顿、阅读器核心功能仍不够全、点击 Google Play 授权立刻提示“已取消 Google 登录”），先完成根因审计（拆解 `readium-navigator-3.0.0.aar` CSS 与 Mixed Content 拦截、`CloudAuthCoordinator` 短路吞错、同步写盘阻塞），再落地完整工程修改并完成双轮 Qodo 与模拟器实机闭环：
+
+1. **Readium EPUB 排版失效与混合内容拦截彻底根治（`:core-reader` & `:app`）**：
+   - 删除受 `https://readium/` WebView Mixed Content 拦截的本地明文 HTTP 服务 [LocalFontHttpServer.kt](../app/src/main/java/com/aitts/v2/reader/LocalFontHttpServer.kt) 及其 `AppContainer` 引用。
+   - 新增 [ReadiumCssOverrideInjector.kt](../app/src/main/java/com/aitts/v2/reader/ReadiumCssOverrideInjector.kt) 与 [ChineseScriptConverter.kt](../app/src/main/java/com/aitts/v2/reader/ChineseScriptConverter.kt)：通过 WebView `evaluateJavascript` 注入 `<style id="aitts-user-override">` 覆盖层（强制生效字重 `300..700`、字距、英文词距、对齐、`h1..h6` 标题与链接高对比度配色、所有主题图片亮度/反色护眼滤镜、首行缩进与竖排增强），并通过 `@JavascriptInterface` `AiTtsReaderBridge.getCustomFontBase64()` + `FontFace('AiTtsCustomFont', bytes)` 绕开 Mixed Content 无损加载用户 `.ttf`/`.otf` 自定义字体，同时支持繁简转换（API 29+ ICU `Transliterator` + API 26-28 兜底映射）。
+   - 修复 [ReadiumViewportSupport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumViewportSupport.kt) 与 [ReadiumEpubViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumEpubViewport.kt)：`SCROLL` 连续滚动模式下屏蔽左右误触翻页并保留居中呼出菜单；将插图点击与 CSS 注入合并到 `onPageLoaded()`、90ms 防抖设置监听及章节切换 `currentHref`；菜单新增「查词翻译」；字体/偏好重建 Fragment 时通过 `latestLocator` 保留实时阅读进度。
+   - 同步使原生分页/滚屏引擎（[ChapterPaginator.kt](../app/src/main/java/com/aitts/v2/ui/reader/ChapterPaginator.kt)、[PagedReaderViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/PagedReaderViewport.kt)、[ReaderContentViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderContentViewport.kt)）接入繁简转换、`ReaderPageAnimation.NONE` 无动画瞬切与原生自动滚屏。
+
+2. **零卡顿悬浮设置面板与阅读器/书架全功能补齐（`:core-reader` & `:app`）**：
+   - 扩展 [ReaderSettings.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderSettings.kt) 与 [ReaderModels.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderModels.kt)（新增 `ReaderOrientationLock`、`ReaderScriptConvert`、`ReaderPageAnimation`、左侧边滑动调亮度开关 `leftEdgeBrightnessGesture`、自动阅读速度 `autoScrollSpeed` 与书籍累计阅读时长 `readingTimeMs`）。
+   - 重构 [BookLibraryRepository.kt](../app/src/main/java/com/aitts/v2/reader/BookLibraryRepository.kt)（`updateSettings` 改为单线程后台 200ms 防抖异步落盘，彻底消除拖动滑块主线程写盘卡顿）、[ReaderSettingsControls.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSettingsControls.kt)（`StepperSliderRow` 本地 `draft` 95ms 节流与抬手提交）与 [ReaderSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSheets.kt)（用轻量非阻塞底部悬浮卡片替代 `ModalBottomSheet`，避免手势冲突并可实时观察正文排版）。
+   - 新增 [BookNotesExporter.kt](../app/src/main/java/com/aitts/v2/reader/BookNotesExporter.kt) 与 [ReaderExtraDialogs.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderExtraDialogs.kt)：补齐 **自动滚动阅读器浮层（调速/暂停/退出）**、**左边缘上下滑动调节屏幕亮度与 HUD**、**横竖屏锁定**、**精准章节/百分比跳转弹窗**、**书籍详情与统计弹窗（阅读时长/字数/章节/插图数/重建索引/Markdown 笔记一键复制与分享）** 及 **迷你听书悬浮条**，并扩展 [BookshelfScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/BookshelfScreen.kt)、[BookshelfItemCard.kt](../app/src/main/java/com/aitts/v2/ui/reader/BookshelfItemCard.kt) 与 [BookshelfViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/BookshelfViewModel.kt) 支持三列封面网格切换、自定义书单分类筛选、长按/菜单编辑信息及系统 `OpenMultipleDocuments` 多选直导（同步更新 [AiTtsAppRoot.kt](../app/src/main/java/com/aitts/v2/ui/navigation/AiTtsAppRoot.kt)）。
+
+3. **Google Play 授权真实分诊与浏览器 OAuth 手动兜底（`:app`）**：
+   - 修复 [CloudAuthCoordinator.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudAuthCoordinator.kt)：移除 `resultCode == Activity.RESULT_CANCELED` 盲目短路，只要 `data != null` 均调用 `Identity.getAuthorizationClient(activity).getAuthorizationResultFromIntent(data)` 解包真实 `ApiException`（使用非弃用 `api?.status?.statusMessage`），清晰区分并展示 `DEVELOPER_ERROR (10)`（附包名 `com.aitts.engine` 与真实签名 SHA-1）、`NETWORK_ERROR (7)`、真取消 `CANCELED (16)` / `12501`；并新增待授权 URL 复制与手动粘贴回调地址完成登录。
+   - 升级 [GoogleDriveLoopbackAuth.kt](../app/src/main/java/com/aitts/v2/reader/GoogleDriveLoopbackAuth.kt)、[GoogleDriveRepository.kt](../app/src/main/java/com/aitts/v2/reader/GoogleDriveRepository.kt)、[CloudFileManagerViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerViewModel.kt) 与 [CloudFileManagerSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerSheets.kt)（`CompletableDeferred` + 后台 accept 线程，支持 `completeManuallyFromUrl`）。
+
+4. **Qodo CLI 两轮审查闭环、单测与架构拆分**：
+   - 新增 [ReadiumCssOverrideInjectorTest.kt](../app/src/test/java/com/aitts/v2/reader/ReadiumCssOverrideInjectorTest.kt) 与 [BookNotesExporterTest.kt](../app/src/test/java/com/aitts/v2/reader/BookNotesExporterTest.kt)，扩展 [ReaderSettingsCompatibilityTest.kt](../core-reader/src/test/kotlin/com/aitts/v2/reader/ReaderSettingsCompatibilityTest.kt)。
+   - 为严格满足 350 行与 140 列规则，拆出辅助组件至 `BookshelfItemCard.kt` 与 `ReaderExtraDialogs.kt`。
+   - **Qodo 第 1 轮**（`operation_id: f14f9616-e2a4-405f-a7c2-1cd2e8f5ac5f`）：检出 1 项 `introduced` 高危缺陷 `69cc61bd-6a92-48f2-9465-22f8ffa5234a`（手动粘贴含非法 `%ZZ` 转义 URL 时 `URLDecoder.decode` 未捕获异常会导致闪退），已在 `GoogleDriveLoopbackAuth.kt` 用 `runCatching` 保护；其余 25 项为历史/非本次新增项（含已删除的 `LocalFontHttpServer.kt` 及部分未在本轮修改的引擎/解析器遗留建议）。
+   - **Qodo 第 2 轮**（`operation_id: 948317a2-c646-4d7e-b0e7-6d7a56bbc45b`，达 2 轮上限）：确认 `complete: True`、`introduced: []`、第 1 轮唯一引入项 `69cc61bd-6a92-48f2-9465-22f8ffa5234a` 状态变为 **`resolved`**。
+
+5. **最终全量门禁、R8 签名产物体积/哈希与 `pixel_34` 实机验收**：
+   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`；全仓 `src/` 含单测共 `170` 个 `.kt` 文件 / `25,002` 行）。
+   - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`（`flash` 子代理执行）：`BUILD SUCCESSFUL in 4m 29s`（退出码 `0`，`0` Kotlin/Java 编译警告与错误），`Detekt`、`Lint` 全部通过，**62/62 单元测试通过**（`:core-model:test` `6`、`:core-engine:test` `37`、`:core-reader:test` `14`、`:app:testCloudDebugUnitTest` `5`；0 跳过、0 失败）。
+   - `cloud` R8 APK：`app/build/outputs/apk/cloud/release/app-cloud-release.apk`（交付文件 `ai-tts-v2-v2.5.0-pre.1-cloud-r8-signed.apk`）— **`6,582,916`** 字节（SHA-256 `D0D697FBF6BB05574AF60939E389AB6D059F7CC533336BBC115A6FAEE01C268B`），`apksigner verify --print-certs` 退出码 `0`。
+   - `full` R8 APK：`app/build/outputs/apk/full/release/app-full-release.apk`（交付文件 `ai-tts-v2-v2.5.0-pre.1-full-r8-signed.apk`）— **`30,273,918`** 字节（SHA-256 `8B00302BCBE70DBDE036DD1ECDBC77B4CA22416818A4F1054E32597E60FA6555`），`apksigner verify --print-certs` 退出码 `0`。
+   - **Android `pixel_34` 模拟器单轮全流程验收**（已人工查验 5 张截图，0 进程崩溃）：
+     - `antigravity-records/screenshots/v2.5.0-pre.1/01_bookshelf_grid_categories.png`（专属目录扫描导入 + 三列网格书架）
+     - `antigravity-records/screenshots/v2.5.0-pre.1/03_reader_overlay_settings.png`（非阻塞四页签悬浮排版面板实时预览）
+     - `antigravity-records/screenshots/v2.5.0-pre.1/02_epub_css_overrides.png`（纯黑护眼 EPUB 粗细/字距/标题对比度与夜间图片变暗滤镜实效）
+     - `antigravity-records/screenshots/v2.5.0-pre.1/04_reader_book_info_jump.png`（书籍统计详情与 Markdown 笔记导出/分享/重建索引弹窗）
+     - `antigravity-records/screenshots/v2.5.0-pre.1/05_gdrive_play_auth_diagnosis.png`（Google 网盘点击 Play 授权后真实暴露错误码 `10: DEVELOPER_ERROR` 与 SHA-1 诊断引导）
+   - 清理旧预发布 `v2.4.0-pre.1`，发布唯一最新预发布 **`v2.5.0-pre.1`** 随附双 R8 签名 APK。

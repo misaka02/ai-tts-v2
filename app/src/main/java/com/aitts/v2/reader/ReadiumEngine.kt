@@ -207,14 +207,12 @@ class ReadiumEngine(context: Context) {
         settings: ReaderSettings,
         appIsDark: Boolean,
         appBgArgb: Int,
-        appTextArgb: Int,
-        customFontFamilyName: String? = null
+        appTextArgb: Int
     ): EpubPreferences {
         val (theme, bg, fg) = resolveEpubThemeColors(settings, appIsDark, appBgArgb, appTextArgb)
-        val resolvedFont = when {
-            !customFontFamilyName.isNullOrBlank() -> FontFamily(customFontFamilyName)
-            settings.fontFamily == ReaderFontFamily.SERIF -> FontFamily.SERIF
-            settings.fontFamily == ReaderFontFamily.MONOSPACE -> FontFamily.MONOSPACE
+        val resolvedFont = when (settings.fontFamily) {
+            ReaderFontFamily.SERIF -> FontFamily.SERIF
+            ReaderFontFamily.MONOSPACE -> FontFamily.MONOSPACE
             else -> FontFamily.SANS_SERIF
         }
         val weightRatio = if (settings.fontWeight != 400) (settings.fontWeight / 400.0).coerceIn(0.5, 2.5) else null

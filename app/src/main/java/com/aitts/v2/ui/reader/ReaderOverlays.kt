@@ -1,6 +1,8 @@
 package com.aitts.v2.ui.reader
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
+import android.text.format.Formatter
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -15,6 +17,7 @@ import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.reader.ReaderTtsState
 import com.aitts.v2.reader.model.BookFormat
+import com.aitts.v2.reader.model.ReaderOrientationLock
 import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderSettings
 
@@ -27,7 +30,8 @@ fun ReaderSystemWindowEffect(
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val activity = view.context as? Activity ?: return@SideEffect
+            val window = activity.window ?: return@SideEffect
             val useDarkBg = when {
                 readerSettings.customBgHex != 0L -> ColorUtils.calculateLuminance(readerSettings.customBgHex.toInt()) < 0.45
                 readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP -> appDefaultIsDark
@@ -49,17 +53,25 @@ fun ReaderSystemWindowEffect(
             } else {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
+            val targetOrient = when (readerSettings.orientationLock) {
+                ReaderOrientationLock.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                ReaderOrientationLock.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                ReaderOrientationLock.SYSTEM -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+            if (activity.requestedOrientation != targetOrient) activity.requestedOrientation = targetOrient
         }
     }
 
     DisposableEffect(appDefaultIsDark) {
         onDispose {
-            val window = (view.context as? Activity)?.window ?: return@onDispose
+            val activity = view.context as? Activity ?: return@onDispose
+            val window = activity.window ?: return@onDispose
             val ctrl = WindowCompat.getInsetsController(window, view)
             ctrl.isAppearanceLightStatusBars = !appDefaultIsDark
             ctrl.show(WindowInsetsCompat.Type.systemBars())
             window.attributes = window.attributes.apply { screenBrightness = -1f }
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 }
@@ -78,6 +90,7 @@ fun ReaderModalHost(
 ) {
     val context = LocalContext.current
     val curBook = state.book
+    val totalChaps = state.readiumPublication?.readingOrder?.size ?: state.index?.chapters?.size ?: 1
     if (curBook != null) {
         val tocChapters = if (state.readiumToc.isNotEmpty()) state.readiumToc else state.index?.chapters.orEmpty()
         when (state.activeSheet) {
@@ -96,10 +109,7 @@ fun ReaderModalHost(
                 onSelectHighlight = { h -> viewModel.jumpToLocatorJson(h.locatorJson, h.chapterIndex, h.blockIndex) },
                 onEditHighlightNote = { h -> viewModel.annotations.handleHighlightAction(editNoteTarget = h) },
                 onRemoveHighlight = { id -> viewModel.annotations.handleHighlightAction(removeId = id) },
-                onSelectImage = { item ->
-                    viewModel.openSheet(null)
-                    viewModel.media.openGalleryItem(item)
-                },
+                onSelectImage = { item -> viewModel.openSheet(null); viewModel.media.openGalleryItem(item) },
                 onExportAllImages = viewModel.media::exportAllImages,
                 onDismiss = { viewModel.openSheet(null) }
             )
@@ -118,7 +128,7 @@ fun ReaderModalHost(
                 settings = readerSettings,
                 isEpub = curBook.format == BookFormat.EPUB,
                 onUpdate = viewModel::updateReaderSettings,
-                onResetDefaults = viewModel::resetReaderSettings,
+                onResetDefaults = { viewModel.updateReaderSettings { ReaderSettings.Default } },
                 onImportFont = viewModel::importCustomFont,
                 onDismiss = { viewModel.openSheet(null) }
             )
@@ -140,6 +150,30 @@ fun ReaderModalHost(
                 onDismiss = { viewModel.openSheet(null) }
             )
             null -> Unit
+        }
+
+        if (state.showJumpDialog) {
+            ReaderJumpDialog(
+                currentChapter = state.currentChapterIndex,
+                totalChapters = totalChaps,
+                currentPercent = (state.currentProgression * 100f).toInt().coerceIn(0, 100),
+                onJumpPercent = viewModel::seekByProgression,
+                onJumpChapter = { ch -> viewModel.goToChapter(ch, 0) },
+                onDismiss = { viewModel.setDialogFlags(jump = false) }
+            )
+        }
+
+        if (state.showBookInfoDialog) {
+            ReaderBookInfoDialog(
+                book = curBook,
+                chapterCount = totalChaps,
+                imageCount = state.bookImages.size,
+                formattedSize = Formatter.formatShortFileSize(context, curBook.fileSizeBytes),
+                onExportNotesCopy = { viewModel.annotations.exportNotesToClipboard(context) },
+                onExportNotesShare = { viewModel.annotations.shareNotes(context) },
+                onReindexBook = viewModel::reindexBook,
+                onDismiss = { viewModel.setDialogFlags(info = false) }
+            )
         }
     }
 
@@ -168,10 +202,10 @@ fun ReaderModalHost(
     state.longPressParagraph?.let { (blockIdx, text) ->
         ReaderParagraphActionDialog(
             text = text,
-            onSpeak = { viewModel.setParagraphMenu(null); viewModel.ttsSearch.startTtsFromBlock(blockIdx) },
-            onCopy = { viewModel.setParagraphMenu(null); viewModel.annotations.copyPlainText(context, text) },
-            onBookmark = { viewModel.setParagraphMenu(null); viewModel.annotations.toggleBookmark(text.take(80), blockIdx) },
-            onDismiss = { viewModel.setParagraphMenu(null) }
+            onSpeak = { viewModel.setDialogFlags(clearPara = true); viewModel.ttsSearch.startTtsFromBlock(blockIdx) },
+            onCopy = { viewModel.setDialogFlags(clearPara = true); viewModel.annotations.copyPlainText(context, text) },
+            onBookmark = { viewModel.setDialogFlags(clearPara = true); viewModel.annotations.toggleBookmark(text.take(80), blockIdx) },
+            onDismiss = { viewModel.setDialogFlags(clearPara = true) }
         )
     }
 

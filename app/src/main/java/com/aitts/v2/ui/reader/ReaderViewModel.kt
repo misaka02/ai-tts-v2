@@ -1,6 +1,5 @@
 package com.aitts.v2.ui.reader
 
-import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -9,6 +8,7 @@ import com.aitts.v2.di.AppContainer
 import com.aitts.v2.model.GlobalSettings
 import com.aitts.v2.model.TtsProviderConfig
 import com.aitts.v2.reader.ReaderTtsState
+import com.aitts.v2.reader.addReadingTime
 import com.aitts.v2.reader.importCustomFont
 import com.aitts.v2.reader.model.BookFormat
 import com.aitts.v2.reader.model.BookIndex
@@ -20,6 +20,7 @@ import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.parser.BookFormatRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.readium.r2.shared.publication.Locator
@@ -56,7 +58,6 @@ class ReaderViewModel(
     private val goToLocatorChannel = Channel<Locator>(capacity = 8)
     val goToLocatorEvents = goToLocatorChannel.receiveAsFlow()
     val readiumEngine get() = container.readiumEngine
-    val localFontServer get() = container.localFontServer
     internal val ttsSearch = ReaderTtsSearchHelper(container, bookId, viewModelScope, _uiState)
     internal val media = ReaderMediaHelper(container, viewModelScope, _uiState)
     internal val annotations = ReaderAnnotationHelper(container, bookId, _uiState)
@@ -68,6 +69,14 @@ class ReaderViewModel(
 
     init {
         viewModelScope.launch { openInitialBook() }
+        viewModelScope.launch {
+            while (isActive) {
+                delay(15_000L)
+                if (!_uiState.value.isLoading && _uiState.value.book != null) {
+                    container.bookLibrary.addReadingTime(bookId, 15_000L)
+                }
+            }
+        }
         viewModelScope.launch {
             container.bookLibrary.booksFlow.collect { books ->
                 books.firstOrNull { it.id == bookId }?.let { updated -> _uiState.update { it.copy(book = updated) } }
@@ -251,7 +260,40 @@ class ReaderViewModel(
 
     fun toggleChrome() = _uiState.update { it.copy(showChrome = !it.showChrome) }
     fun openSheet(sheet: ReaderSheet?) = _uiState.update { it.copy(activeSheet = sheet) }
-    fun setParagraphMenu(pair: Pair<Int, String>?) = _uiState.update { it.copy(longPressParagraph = pair) }
+    fun setDialogFlags(jump: Boolean? = null, info: Boolean? = null, paragraph: Pair<Int, String>? = null, clearPara: Boolean = false) =
+        _uiState.update {
+            it.copy(
+                showJumpDialog = jump ?: it.showJumpDialog,
+                showBookInfoDialog = info ?: it.showBookInfoDialog,
+                longPressParagraph = if (clearPara) null else (paragraph ?: it.longPressParagraph)
+            )
+        }
+
+    fun controlAutoScroll(active: Boolean? = null, paused: Boolean? = null, speedDelta: Int = 0) {
+        if (speedDelta != 0) {
+            updateReaderSettings { it.copy(autoScrollSpeed = (it.autoScrollSpeed + speedDelta).coerceIn(1, 10)) }
+        }
+        _uiState.update {
+            it.copy(
+                autoScrollActive = active ?: it.autoScrollActive,
+                autoScrollPaused = paused ?: it.autoScrollPaused,
+                showChrome = if (active == true) false else it.showChrome
+            )
+        }
+    }
+
+    fun reindexBook() {
+        val record = _uiState.value.book ?: return
+        viewModelScope.launch {
+            val fresh = withContext(Dispatchers.IO) {
+                BookFormatRegistry.parserFor(record.format)
+                    .indexBook(container.bookLibrary.bookFile(record), record.title)
+                    .also { container.bookLibrary.saveBookIndex(bookId, it) }
+            }
+            _uiState.update { it.copy(index = fresh, showBookInfoDialog = false, statusMessage = "已重建目录索引 (${fresh.chapters.size} 章)") }
+        }
+    }
+
     fun consumeStatusMessage() = _uiState.update { it.copy(statusMessage = null) }
 
     fun togglePlayPause() {
@@ -262,23 +304,6 @@ class ReaderViewModel(
 
     fun updateReaderSettings(transform: (ReaderSettings) -> ReaderSettings) =
         container.bookLibrary.updateSettings(transform(container.bookLibrary.settingsFlow.value))
-
-    fun resetReaderSettings() {
-        container.bookLibrary.updateSettings(ReaderSettings.Default)
-        _uiState.update { it.copy(statusMessage = "已恢复默认排版设置") }
-    }
-
-    fun toggleDayNightQuick(appIsDark: Boolean) {
-        val cur = container.bookLibrary.settingsFlow.value
-        val curDark = when {
-            cur.customBgHex != 0L ->
-                androidx.core.graphics.ColorUtils.calculateLuminance(cur.customBgHex.toInt()) < 0.45
-            cur.paperTheme == ReaderPaperTheme.FOLLOW_APP -> appIsDark
-            else -> cur.paperTheme.isDark
-        }
-        val nextTheme = if (curDark) ReaderPaperTheme.CREAM else ReaderPaperTheme.NIGHT
-        updateReaderSettings { it.copy(paperTheme = nextTheme, customBgHex = 0L, customTextHex = 0L) }
-    }
 
     fun importCustomFont(uri: Uri) = container.bookLibrary.importCustomFont(uri).fold(
         onSuccess = { path ->

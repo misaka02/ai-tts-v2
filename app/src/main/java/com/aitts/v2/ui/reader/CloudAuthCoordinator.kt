@@ -14,6 +14,7 @@ import com.aitts.v2.engine.cloud.GoogleOAuthClientJsonParser
 import com.aitts.v2.engine.cloud.WebDavConfig
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,8 +26,8 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
 /**
- * Coordinates Browser OAuth 2.0 PKCE (with client_secret.json import),
- * Google Play Services One-Tap auth diagnostics, manual Token connection, and WebDAV verification.
+ * Coordinates Browser OAuth 2.0 PKCE (with Desktop JSON import & manual callback fallback),
+ * Google Play Services One-Tap real error diagnostics, manual Token connection, and WebDAV verification.
  */
 internal class CloudAuthCoordinator(
     private val container: AppContainer,
@@ -36,11 +37,12 @@ internal class CloudAuthCoordinator(
 
     fun setDevAuthSheet(show: Boolean) = state.update { it.copy(showDevAuthSheet = show) }
 
-    fun updateDevInputs(cid: String? = null, sec: String? = null, tok: String? = null) = state.update {
+    fun updateDevInputs(cid: String? = null, sec: String? = null, tok: String? = null, pastedUrl: String? = null) = state.update {
         it.copy(
             devClientId = cid ?: it.devClientId,
             devClientSecret = sec ?: it.devClientSecret,
-            devAccessToken = tok ?: it.devAccessToken
+            devAccessToken = tok ?: it.devAccessToken,
+            pastedCallbackUrl = pastedUrl ?: it.pastedCallbackUrl
         )
     }
 
@@ -61,6 +63,22 @@ internal class CloudAuthCoordinator(
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("App Signing Info", "包名: $pkg\nSHA-1: $sha1"))
         state.update { it.copy(statusMessage = "已复制包名与 SHA-1 指纹") }
+    }
+
+    fun copyPendingAuthUrl(context: Context) {
+        val url = state.value.pendingAuthUrl
+        if (url.isBlank()) return
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Google Auth URL", url))
+        state.update { it.copy(statusMessage = "已复制授权链接，可粘贴到任意浏览器打开") }
+    }
+
+    fun submitManualCallbackUrl() {
+        val raw = state.value.pastedCallbackUrl.trim()
+        val accepted = container.googleDrive.completeManualBrowserCallback(raw)
+        if (!accepted) {
+            state.update { it.copy(errorMessage = "未检测到包含 code 与 state 参数的回调链接，请完整复制浏览器地址栏 URL。") }
+        }
     }
 
     fun importClientSecretJson(context: Context, uri: Uri) {
@@ -110,7 +128,7 @@ internal class CloudAuthCoordinator(
         val csec = st.devClientSecret.trim()
         if (cid.isBlank()) {
             state.update {
-                it.copy(errorMessage = "尚未配置 OAuth Client ID：请先导入 Google Cloud 下载的 client_secret.json，或展开填写 Client ID。")
+                it.copy(errorMessage = "尚未配置 OAuth Client ID：请先导入 Google Cloud 桌面应用 client_secret.json，或展开填写 Client ID。")
             }
             return
         }
@@ -118,25 +136,20 @@ internal class CloudAuthCoordinator(
             it.copy(
                 isBusy = true,
                 isBrowserAuthWaiting = true,
+                pendingAuthUrl = "",
+                pastedCallbackUrl = "",
                 busyLabel = "请在浏览器中完成 Google 授权并允许跳转回应用...",
                 errorMessage = null
             )
         }
         scope.launch {
             val result = container.googleDrive.authorizeInBrowser(cid, csec) { authUrl ->
+                state.update { it.copy(pendingAuthUrl = authUrl) }
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 try {
                     context.startActivity(intent)
                 } catch (_: ActivityNotFoundException) {
-                    container.googleDrive.cancelPendingAuth()
-                    state.update {
-                        it.copy(
-                            isBusy = false,
-                            isBrowserAuthWaiting = false,
-                            busyLabel = "",
-                            errorMessage = "未找到可用的系统浏览器，请先安装浏览器或使用 SAF 直选。"
-                        )
-                    }
+                    state.update { it.copy(statusMessage = "未能自动调起浏览器，请复制下方授权链接手动打开") }
                 }
             }
             result.fold(
@@ -145,6 +158,8 @@ internal class CloudAuthCoordinator(
                         it.copy(
                             isBusy = false,
                             isBrowserAuthWaiting = false,
+                            pendingAuthUrl = "",
+                            pastedCallbackUrl = "",
                             busyLabel = "",
                             statusMessage = "已通过浏览器连接 Google Drive（支持自动续期）"
                         )
@@ -155,6 +170,7 @@ internal class CloudAuthCoordinator(
                         it.copy(
                             isBusy = false,
                             isBrowserAuthWaiting = false,
+                            pendingAuthUrl = "",
                             busyLabel = "",
                             errorMessage = diagnoseNetworkOrOAuthError(err)
                         )
@@ -167,7 +183,14 @@ internal class CloudAuthCoordinator(
     fun cancelBrowserPkceAuth() {
         container.googleDrive.cancelPendingAuth()
         state.update {
-            it.copy(isBusy = false, isBrowserAuthWaiting = false, busyLabel = "", statusMessage = "已取消浏览器登录")
+            it.copy(
+                isBusy = false,
+                isBrowserAuthWaiting = false,
+                pendingAuthUrl = "",
+                pastedCallbackUrl = "",
+                busyLabel = "",
+                statusMessage = "已取消浏览器登录"
+            )
         }
     }
 
@@ -195,9 +218,16 @@ internal class CloudAuthCoordinator(
             }
     }
 
-    fun handleGoogleAuthResult(activity: Activity, resultCode: Int, data: Intent?) {
-        if (resultCode == Activity.RESULT_CANCELED || data == null) {
-            state.update { it.copy(isBusy = false, busyLabel = "", statusMessage = "已取消 Google 登录") }
+    fun handleGoogleAuthResult(activity: Activity, data: Intent?) {
+        if (data == null) {
+            state.update {
+                it.copy(
+                    isBusy = false,
+                    busyLabel = "",
+                    errorMessage = "Google Play 授权未返回结果（可能是设备 Play 商店未配置当前应用 SHA-1 或弹窗被拦截），" +
+                        "请改用「浏览器 OAuth 永久登录」或「系统网盘直选」。"
+                )
+            }
             return
         }
         runCatching {
@@ -261,14 +291,21 @@ internal class CloudAuthCoordinator(
     }
 
     private fun diagnosePlayServicesError(err: Throwable, sha1: String): String {
-        val code = (err as? ApiException)?.statusCode
+        val api = err as? ApiException
+        val code = api?.statusCode
+        val rawMsg = api?.status?.statusMessage ?: api?.message ?: err.message.orEmpty()
         return when (code) {
-            10 -> "Play 服务拒绝 (错误码 10: DEVELOPER_ERROR)：当前 APK 签名 (SHA-1: $sha1) 未绑定 com.aitts.engine。\n" +
+            CommonStatusCodes.DEVELOPER_ERROR -> "Google Play 拒绝授权 (错误码 10: DEVELOPER_ERROR)：" +
+                "当前 APK 签名 (SHA-1: $sha1) 未在 Google Cloud Console 绑定包名 com.aitts.engine。\n" +
                 "请改用上方「浏览器 OAuth 永久登录」或「系统网盘直选」。"
-            7 -> "网络错误 (错误码 7)：无法连接 Google 服务，请确认代理/VPN 畅通后重试。"
-            16 -> "当前设备未启用或缺少 Google Play 服务 (错误码 16)，请使用「浏览器 OAuth 登录」或「系统网盘直选」。"
-            12501 -> "已取消 Google 账号授权。"
-            else -> "Play 服务授权失败${code?.let { " (错误码 $it)" } ?: ""}：${err.message.orEmpty()}。建议改用「浏览器 OAuth 登录」或「系统网盘直选」。"
+            CommonStatusCodes.NETWORK_ERROR -> "网络错误 (错误码 7)：无法连接 Google 服务，请确认代理/VPN 畅通。"
+            CommonStatusCodes.CANCELED -> if (rawMsg.contains("cancel", true)) {
+                "您取消了 Google Play 授权 (错误码 16)。"
+            } else {
+                "Play 授权未能完成 (错误码 16: $rawMsg)，常见原因为未绑定测试账号/SHA-1 或网络超时。建议改用「浏览器 OAuth」。"
+            }
+            12501 -> "您取消了 Google 账号授权 (错误码 12501)。"
+            else -> "Play 服务授权失败${code?.let { " (错误码 $it)" } ?: ""}：$rawMsg。建议改用「浏览器 OAuth」或「系统网盘直选」。"
         }
     }
 

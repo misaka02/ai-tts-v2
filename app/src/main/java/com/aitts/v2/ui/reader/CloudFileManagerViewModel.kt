@@ -49,6 +49,8 @@ data class CloudFileManagerUiState(
     val dedicatedDirLabel: String = "",
     val showDevAuthSheet: Boolean = false,
     val isBrowserAuthWaiting: Boolean = false,
+    val pendingAuthUrl: String = "",
+    val pastedCallbackUrl: String = "",
     val devClientId: String = com.aitts.v2.BuildConfig.GDRIVE_DEFAULT_CLIENT_ID,
     val devClientSecret: String = "",
     val devAccessToken: String = "",

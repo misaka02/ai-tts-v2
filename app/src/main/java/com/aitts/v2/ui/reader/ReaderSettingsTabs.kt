@@ -5,20 +5,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.aitts.v2.reader.model.ReaderColumnCount
 import com.aitts.v2.reader.model.ReaderDirection
 import com.aitts.v2.reader.model.ReaderFontFamily
 import com.aitts.v2.reader.model.ReaderImageFilter
+import com.aitts.v2.reader.model.ReaderOrientationLock
+import com.aitts.v2.reader.model.ReaderPageAnimation
 import com.aitts.v2.reader.model.ReaderReadingMode
+import com.aitts.v2.reader.model.ReaderScriptConvert
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.model.ReaderTapZoneMode
 import com.aitts.v2.reader.model.ReaderTextAlign
@@ -52,7 +53,7 @@ fun ReaderAppearanceTab(
         }
         InkPaperCard(padding = 12.dp) {
             SettingChipGroup(
-                label = "夜间插图护眼滤镜",
+                label = "插图护眼滤镜 (所有主题生效)",
                 items = ReaderImageFilter.entries,
                 selected = settings.nightImageFilter,
                 itemLabel = { it.displayName },
@@ -120,11 +121,18 @@ fun ReaderFontTab(
                     OutlinedButton(onClick = { onUpdate { it.copy(customFontPath = "") } }) { Text("清除字体") }
                 }
             }
+            SettingChipGroup(
+                label = "中文简繁转换",
+                items = ReaderScriptConvert.entries,
+                selected = settings.scriptConvert,
+                itemLabel = { it.displayName },
+                onSelect = { conv -> onUpdate { it.copy(scriptConvert = conv) } }
+            )
             if (isEpub) {
                 SettingToggleRow(
                     label = "保留 EPUB 出版商原样式",
                     checked = settings.publisherStyles,
-                    subtitle = "开启后优先按原书 CSS 渲染"
+                    subtitle = "开启后优先保留原书行距、缩进与对齐"
                 ) { on -> onUpdate { it.copy(publisherStyles = on) } }
             }
         }
@@ -213,7 +221,7 @@ fun ReaderLayoutTab(
         if (isEpub) {
             InkPaperCard(padding = 12.dp) {
                 SettingChipGroup(
-                    label = "分栏模式 (横屏/大屏)",
+                    label = "分栏模式 (横屏/平板宽屏生效)",
                     items = ReaderColumnCount.entries,
                     selected = settings.columnCount,
                     itemLabel = { it.displayName },
@@ -226,7 +234,7 @@ fun ReaderLayoutTab(
                     itemLabel = { it.displayName },
                     onSelect = { dir -> onUpdate { it.copy(readingDirection = dir) } }
                 )
-                SettingToggleRow("竖排排版 (日文/繁体古籍)", settings.verticalText) { on ->
+                SettingToggleRow("竖排排版 (右起竖行)", settings.verticalText) { on ->
                     onUpdate { it.copy(verticalText = on) }
                 }
                 SettingToggleRow("英文单词自动断字", settings.hyphens) { on ->
@@ -253,6 +261,13 @@ fun ReaderInteractionTab(
             )
             if (settings.readingMode == ReaderReadingMode.PAGED) {
                 SettingChipGroup(
+                    label = "翻页动效",
+                    items = ReaderPageAnimation.entries,
+                    selected = settings.pageAnimation,
+                    itemLabel = { it.displayName },
+                    onSelect = { anim -> onUpdate { it.copy(pageAnimation = anim) } }
+                )
+                SettingChipGroup(
                     label = "屏幕点击区域",
                     items = ReaderTapZoneMode.entries,
                     selected = settings.tapZoneMode,
@@ -271,6 +286,16 @@ fun ReaderInteractionTab(
         }
 
         InkPaperCard(padding = 12.dp) {
+            SettingChipGroup(
+                label = "屏幕方向锁定",
+                items = ReaderOrientationLock.entries,
+                selected = settings.orientationLock,
+                itemLabel = { it.displayName },
+                onSelect = { lock -> onUpdate { it.copy(orientationLock = lock) } }
+            )
+            SettingToggleRow("左侧边缘上下滑调节亮度", settings.leftEdgeBrightnessGesture) { on ->
+                onUpdate { it.copy(leftEdgeBrightnessGesture = on) }
+            }
             SettingToggleRow("阅读时屏幕常亮", settings.keepScreenOn) { on -> onUpdate { it.copy(keepScreenOn = on) } }
             SettingToggleRow("全屏沉浸隐藏系统栏", settings.fullscreenImmersive) { on ->
                 onUpdate { it.copy(fullscreenImmersive = on) }
