@@ -15,7 +15,6 @@ import com.aitts.v2.reader.model.BookIndex
 import com.aitts.v2.reader.model.BookRecord
 import com.aitts.v2.reader.model.ChapterContent
 import com.aitts.v2.reader.model.ChapterRef
-import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.parser.BookFormatRegistry
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +59,7 @@ class ReaderViewModel(
     val readiumEngine get() = container.readiumEngine
     internal val ttsSearch = ReaderTtsSearchHelper(container, bookId, viewModelScope, _uiState)
     internal val media = ReaderMediaHelper(container, viewModelScope, _uiState)
-    internal val annotations = ReaderAnnotationHelper(container, bookId, _uiState)
+    internal val annotations = ReaderAnnotationHelper(container, bookId, viewModelScope, _uiState)
 
     private var lastSavedChapter = -1
     private var lastSavedBlock = -1
@@ -191,23 +190,40 @@ class ReaderViewModel(
         val st = _uiState.value
         val pub = st.readiumPublication
         if (pub != null) {
-            container.readiumEngine.locatorForProgression(pub, st.readiumPositions, fraction.toDouble())
-                ?.let { goToLocatorChannel.trySend(it) }
+            container.readiumEngine.locatorForProgression(pub, st.readiumPositions, fraction.toDouble())?.let {
+                val prev = st.currentLocatorJson.takeIf { j -> j.isNotBlank() }
+                _uiState.update { cur -> cur.copy(jumpBackLocatorJson = prev) }
+                goToLocatorChannel.trySend(it)
+            }
             return
         }
         val chapters = st.index?.chapters ?: return
-        if (chapters.isNotEmpty()) {
-            val idx = (fraction.coerceIn(0f, 0.999f) * chapters.size).toInt().coerceIn(0, chapters.lastIndex)
-            goToChapter(idx, 0)
-        }
+        if (chapters.isNotEmpty()) goToChapter((fraction.coerceIn(0f, 0.999f) * chapters.size).toInt().coerceIn(0, chapters.lastIndex), 0)
     }
 
-    fun jumpToLocatorJson(locatorJson: String, fallbackChapter: Int, fallbackBlock: Int) {
+    fun openFootnote(resolvedHref: String) =
+        annotations.openFootnote(resolvedHref, _uiState.value.readiumPublication) { goToLocatorChannel.trySend(it) }
+
+    fun jumpToLocatorJson(
+        locatorJson: String,
+        fallbackChapter: Int,
+        fallbackBlock: Int,
+        recordJumpBack: Boolean = false,
+        clearJumpBack: Boolean = false
+    ) {
+        val curLoc = _uiState.value.currentLocatorJson.takeIf { it.isNotBlank() }
         val loc = if (_uiState.value.readiumPublication != null) container.readiumEngine.parseLocator(locatorJson) else null
         if (loc != null) {
+            val nextBack = when {
+                clearJumpBack -> null
+                recordJumpBack -> curLoc
+                else -> _uiState.value.jumpBackLocatorJson
+            }
+            _uiState.update { it.copy(activeSheet = null, jumpBackLocatorJson = nextBack) }
             goToLocatorChannel.trySend(loc)
-            _uiState.update { it.copy(activeSheet = null) }
-        } else goToChapter(fallbackChapter, fallbackBlock)
+        } else {
+            goToChapter(fallbackChapter, fallbackBlock)
+        }
     }
 
     private suspend fun loadNativeChapter(
@@ -259,20 +275,26 @@ class ReaderViewModel(
     }
 
     fun toggleChrome() = _uiState.update { it.copy(showChrome = !it.showChrome) }
-    fun openSheet(sheet: ReaderSheet?) = _uiState.update { it.copy(activeSheet = sheet) }
-    fun setDialogFlags(jump: Boolean? = null, info: Boolean? = null, paragraph: Pair<Int, String>? = null, clearPara: Boolean = false) =
-        _uiState.update {
-            it.copy(
-                showJumpDialog = jump ?: it.showJumpDialog,
-                showBookInfoDialog = info ?: it.showBookInfoDialog,
-                longPressParagraph = if (clearPara) null else (paragraph ?: it.longPressParagraph)
-            )
-        }
+    fun openSheet(sheet: ReaderSheet?) = _uiState.update {
+        it.copy(activeSheet = sheet, showChrome = if (sheet == ReaderSheet.APPEARANCE) false else it.showChrome)
+    }
+    fun setDialogFlags(
+        jump: Boolean? = null,
+        info: Boolean? = null,
+        paragraph: Pair<Int, String>? = null,
+        clearPara: Boolean = false,
+        clearFootnote: Boolean = false
+    ) = _uiState.update {
+        it.copy(
+            showJumpDialog = jump ?: it.showJumpDialog,
+            showBookInfoDialog = info ?: it.showBookInfoDialog,
+            longPressParagraph = if (clearPara) null else (paragraph ?: it.longPressParagraph),
+            activeFootnote = if (clearFootnote) null else it.activeFootnote
+        )
+    }
 
     fun controlAutoScroll(active: Boolean? = null, paused: Boolean? = null, speedDelta: Int = 0) {
-        if (speedDelta != 0) {
-            updateReaderSettings { it.copy(autoScrollSpeed = (it.autoScrollSpeed + speedDelta).coerceIn(1, 10)) }
-        }
+        if (speedDelta != 0) updateReaderSettings { it.copy(autoScrollSpeed = (it.autoScrollSpeed + speedDelta).coerceIn(1, 10)) }
         _uiState.update {
             it.copy(
                 autoScrollActive = active ?: it.autoScrollActive,

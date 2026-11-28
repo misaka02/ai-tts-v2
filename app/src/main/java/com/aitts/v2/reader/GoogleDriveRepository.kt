@@ -75,6 +75,22 @@ class GoogleDriveRepository(
 
     fun completeManualBrowserCallback(pastedUrl: String): Boolean = loopbackAuth.completeManuallyFromUrl(pastedUrl)
 
+    fun saveDraftClientCredentials(clientId: String, clientSecret: String) {
+        val cleanId = clientId.trim()
+        val cleanSec = clientSecret.trim()
+        if (cleanId.isEmpty()) return
+        val draft = GoogleDriveAuthConfig(clientId = cleanId, clientSecret = cleanSec)
+        runCatching { secretStore.saveSecretString(DRAFT_CLIENT_KEY, json.encodeToString(draft)) }
+    }
+
+    fun loadDraftClientCredentials(): Pair<String, String> {
+        val raw = secretStore.getSecretString(DRAFT_CLIENT_KEY) ?: return "" to ""
+        return runCatching {
+            val cfg = json.decodeFromString<GoogleDriveAuthConfig>(raw)
+            cfg.clientId.trim() to cfg.clientSecret.trim()
+        }.getOrDefault("" to "")
+    }
+
     suspend fun connectWithTokens(
         clientId: String,
         clientSecret: String,
@@ -213,23 +229,6 @@ class GoogleDriveRepository(
         MessageDigest.getInstance("SHA-1").digest(sig.toByteArray()).joinToString(":") { "%02X".format(it) }
     }.getOrDefault("未知")
 
-    private fun DriveFileItem.toCloudNode() = CloudFileNode(
-        id = id,
-        name = name,
-        path = id,
-        isFolder = isFolder,
-        sizeBytes = sizeBytes,
-        mimeType = mimeType
-    )
-
-    private fun mimeForName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
-        "epub" -> "application/epub+zip"
-        "json" -> "application/json"
-        "md", "markdown" -> "text/markdown"
-        "html", "htm" -> "text/html"
-        else -> "text/plain"
-    }
-
     private fun saveConfig(config: GoogleDriveAuthConfig) {
         synchronized(configLock) {
             val saved = secretStore.saveSecretString(SECRET_KEY, json.encodeToString(config))
@@ -245,5 +244,23 @@ class GoogleDriveRepository(
 
     companion object {
         private const val SECRET_KEY = "google_drive_auth_v1"
+        private const val DRAFT_CLIENT_KEY = "google_drive_draft_client_v1"
     }
+}
+
+private fun DriveFileItem.toCloudNode() = CloudFileNode(
+    id = id,
+    name = name,
+    path = id,
+    isFolder = isFolder,
+    sizeBytes = sizeBytes,
+    mimeType = mimeType
+)
+
+private fun mimeForName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    "epub" -> "application/epub+zip"
+    "json" -> "application/json"
+    "md", "markdown" -> "text/markdown"
+    "html", "htm" -> "text/html"
+    else -> "text/plain"
 }

@@ -6,7 +6,7 @@ import android.text.format.Formatter
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.graphics.ColorUtils
@@ -29,35 +29,43 @@ fun ReaderSystemWindowEffect(
 ) {
     val view = LocalView.current
     if (!view.isInEditMode) {
-        SideEffect {
-            val activity = view.context as? Activity ?: return@SideEffect
-            val window = activity.window ?: return@SideEffect
-            val useDarkBg = when {
-                readerSettings.customBgHex != 0L -> ColorUtils.calculateLuminance(readerSettings.customBgHex.toInt()) < 0.45
-                readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP -> appDefaultIsDark
-                else -> readerSettings.paperTheme.isDark
-            }
-            val ctrl = WindowCompat.getInsetsController(window, view)
-            ctrl.isAppearanceLightStatusBars = !useDarkBg
+        val useDarkBg = when {
+            readerSettings.customBgHex != 0L -> ColorUtils.calculateLuminance(readerSettings.customBgHex.toInt()) < 0.45
+            readerSettings.paperTheme == ReaderPaperTheme.FOLLOW_APP -> appDefaultIsDark
+            else -> readerSettings.paperTheme.isDark
+        }
+        val hideSystemBars = readerSettings.fullscreenImmersive && !showChrome
+        val targetBrightness = if (readerSettings.brightness < 0f) -1f else readerSettings.brightness.coerceIn(0.05f, 1f)
+        val targetOrient = when (readerSettings.orientationLock) {
+            ReaderOrientationLock.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            ReaderOrientationLock.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            ReaderOrientationLock.SYSTEM -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+
+        LaunchedEffect(useDarkBg) {
+            val activity = view.context as? Activity ?: return@LaunchedEffect
+            WindowCompat.getInsetsController(activity.window, view).isAppearanceLightStatusBars = !useDarkBg
+        }
+        LaunchedEffect(hideSystemBars) {
+            val activity = view.context as? Activity ?: return@LaunchedEffect
+            val ctrl = WindowCompat.getInsetsController(activity.window, view)
             ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            if (readerSettings.fullscreenImmersive && !showChrome) {
-                ctrl.hide(WindowInsetsCompat.Type.systemBars())
-            } else {
-                ctrl.show(WindowInsetsCompat.Type.systemBars())
+            if (hideSystemBars) ctrl.hide(WindowInsetsCompat.Type.systemBars())
+            else ctrl.show(WindowInsetsCompat.Type.systemBars())
+        }
+        LaunchedEffect(targetBrightness) {
+            val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+            if (window.attributes.screenBrightness != targetBrightness) {
+                window.attributes = window.attributes.apply { screenBrightness = targetBrightness }
             }
-            window.attributes = window.attributes.apply {
-                screenBrightness = if (readerSettings.brightness < 0f) -1f else readerSettings.brightness.coerceIn(0.05f, 1f)
-            }
-            if (readerSettings.keepScreenOn) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-            val targetOrient = when (readerSettings.orientationLock) {
-                ReaderOrientationLock.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                ReaderOrientationLock.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                ReaderOrientationLock.SYSTEM -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            }
+        }
+        LaunchedEffect(readerSettings.keepScreenOn) {
+            val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+            if (readerSettings.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        LaunchedEffect(targetOrient) {
+            val activity = view.context as? Activity ?: return@LaunchedEffect
             if (activity.requestedOrientation != targetOrient) activity.requestedOrientation = targetOrient
         }
     }
@@ -103,7 +111,7 @@ fun ReaderModalHost(
                 isExportingImages = state.isExportingImages,
                 imageExportProgress = state.imageExportProgress,
                 loadThumbnail = viewModel.media::loadThumbnail,
-                onSelectChapter = { viewModel.goToChapter(it, 0) },
+                onSelectChapter = { ref -> viewModel.jumpToLocatorJson(ref.locator, ref.index, 0, recordJumpBack = true) },
                 onSelectBookmark = { mark -> viewModel.jumpToLocatorJson(mark.locatorJson, mark.chapterIndex, mark.blockIndex) },
                 onRemoveBookmark = viewModel.annotations::removeBookmark,
                 onSelectHighlight = { h -> viewModel.jumpToLocatorJson(h.locatorJson, h.chapterIndex, h.blockIndex) },
@@ -219,6 +227,14 @@ fun ReaderModalHost(
             onSave = viewModel.media::saveActiveImage,
             onShare = { viewModel.media.shareActiveImage(context) },
             onDismiss = viewModel.media::dismissLightbox
+        )
+    }
+
+    state.activeFootnote?.let { (title, body) ->
+        ReaderFootnoteDialog(
+            title = title,
+            body = body,
+            onDismiss = { viewModel.setDialogFlags(clearFootnote = true) }
         )
     }
 }

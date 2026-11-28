@@ -12,6 +12,7 @@ import com.aitts.v2.reader.model.ReaderPaperTheme
 import com.aitts.v2.reader.model.ReaderReadingMode
 import com.aitts.v2.reader.model.ReaderSettings
 import com.aitts.v2.reader.model.ReaderTextAlign
+import com.aitts.v2.reader.parser.EpubFootnoteExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -165,6 +166,17 @@ class ReadiumEngine(context: Context) {
         val noFrag = raw.trim().substringBefore('#').substringBefore('?')
         val stripped = noFrag.removePrefix("https://readium/").removePrefix("http://readium/").trimStart('/')
         return runCatching { URLDecoder.decode(stripped, "UTF-8") }.getOrDefault(stripped)
+    }
+
+    suspend fun loadFootnoteText(publication: Publication, resolvedHref: String): Pair<String, String>? {
+        val path = resolvedHref.substringBefore('#').trimStart('/')
+        val frag = resolvedHref.substringAfter('#', "").trim()
+        if (path.isBlank() || frag.isBlank()) return null
+        val bytes = readResourceBytes(publication, path) ?: return null
+        val text = withContext(Dispatchers.Default) {
+            EpubFootnoteExtractor.extractById(bytes.toString(Charsets.UTF_8), frag)
+        }
+        return if (text.isNotBlank()) "注释说明" to text else null
     }
 
     fun resolveChapterIndex(publication: Publication, locator: Locator): Int {

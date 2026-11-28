@@ -235,7 +235,7 @@ fun ReaderTocSheet(
     isExportingImages: Boolean,
     imageExportProgress: String,
     loadThumbnail: suspend (String) -> Bitmap?,
-    onSelectChapter: (Int) -> Unit,
+    onSelectChapter: (ChapterRef) -> Unit,
     onSelectBookmark: (BookBookmark) -> Unit,
     onRemoveBookmark: (String) -> Unit,
     onSelectHighlight: (BookHighlight) -> Unit,
@@ -268,7 +268,7 @@ fun ReaderTocSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onSelectChapter(pos) }
+                                .clickable { onSelectChapter(chap) }
                                 .padding(start = indentDp, end = 16.dp, top = 12.dp, bottom = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {

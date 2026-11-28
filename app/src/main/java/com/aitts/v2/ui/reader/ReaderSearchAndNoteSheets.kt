@@ -236,3 +236,17 @@ fun HighlightListTab(
         }
     }
 }
+
+@Composable
+fun ReaderFootnoteDialog(
+    title: String,
+    body: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title.ifBlank { "注释说明" }) },
+        text = { Text(body, style = MaterialTheme.typography.bodyMedium) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
+}

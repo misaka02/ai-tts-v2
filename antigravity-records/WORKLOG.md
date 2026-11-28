@@ -305,3 +305,41 @@
      - `antigravity-records/screenshots/v2.5.0-pre.1/04_reader_book_info_jump.png`（书籍统计详情与 Markdown 笔记导出/分享/重建索引弹窗）
      - `antigravity-records/screenshots/v2.5.0-pre.1/05_gdrive_play_auth_diagnosis.png`（Google 网盘点击 Play 授权后真实暴露错误码 `10: DEVELOPER_ERROR` 与 SHA-1 诊断引导）
    - 清理旧预发布 `v2.4.0-pre.1`，发布唯一最新预发布 **`v2.5.0-pre.1`** 随附双 R8 签名 APK。
+
+---
+
+## 14. v2.6.0-pre.1 阅读器手势与零抽搐修复、《创约 11》EPUB 3 全格式兼容与 Google Drive 登录优化
+
+围绕第 1 轮拆分目标（阅读器中间点击误翻页、开启排版栏正文抽搐、真实 EPUB 3 轻小说《创约 某魔法的禁书目录 11》全特性支持、以及 Google 网盘登录优化），完成全面重构、真包实测与两轮 Qodo 审查闭环（31 个文件，+716 / -342 行）：
+
+1. **阅读器居中点击安全区、零抽搐窗口控制与滑块稳定性（`:app` & `:core-reader`）**：
+   - 修复 [ReadiumViewportSupport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumViewportSupport.kt)、[ReadiumEpubViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReadiumEpubViewport.kt) 与 [PagedReaderViewport.kt](../app/src/main/java/com/aitts/v2/ui/reader/PagedReaderViewport.kt)：重命名 `READER_INTERACTION_JS` 并跳过 FXL 封面/插画/满屏图片直弹灯箱，`handleEpubTapZone` 新增 `showChrome` 优先收起菜单与无条件居中菜单热区（`fx in 0.28..0.72 && fy in 0.20..0.80`）及 RTL 翻页方向翻转。
+   - 新增稳定状态栏/导航栏内边距辅助 `rememberStableSystemBarPadding()`（[ReaderStatusBars.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderStatusBars.kt)），并将 [ReaderOverlays.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderOverlays.kt) 中每帧重写 `window.attributes` 的 `SideEffect` 替换为 5 个带键 `LaunchedEffect`，结合 [ReaderScreen.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderScreen.kt) 展开排版栏时自动隐藏 `showChrome`、单 `LaunchedEffect(lastSubmittedPrefs)` 序列化提交偏好与 [ReaderSettingsControls.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSettingsControls.kt) `isDragging` 护栏及 [ReaderSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSheets.kt) `BackHandler`，彻底消除呼出排版栏导致正文跳动抽搐的问题。
+
+2. **《创约 某魔法的禁书目录 11》EPUB 3 全格式深度保真与注脚弹窗（`:core-reader` & `:app`）**：
+   - 默认开启出版商原版样式 `publisherStyles = true`（[ReaderSettings.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderSettings.kt) + [ReaderSettingsCompatibilityTest.kt](../core-reader/src/test/kotlin/com/aitts/v2/reader/ReaderSettingsCompatibilityTest.kt)），修复 [ReaderModels.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/model/ReaderModels.kt) 中 `ReadingProgress.progressPercent` 在全书 `totalProgression > 0` 时未优先使用精确比例的问题，并在 [ReaderStatusBars.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderStatusBars.kt) 增加 `isBookmarkMatched` 容差匹配。
+   - 外科手术式调整 [ReadiumCssOverrideInjector.kt](../app/src/main/java/com/aitts/v2/reader/ReadiumCssOverrideInjector.kt) 与 [ReadiumCssOverrideInjectorTest.kt](../app/src/test/java/com/aitts/v2/reader/ReadiumCssOverrideInjectorTest.kt)：完整保留书内嵌入字体、着重号 `text-emphasis: "●"`、`.title-subtitle` 与 `a.noteref` 配色、`p.hanging-punc` 悬挂标点、`p.img`、`h2` 居中及 `<ruby><rt>` 注音效果。
+   - 在 [EpubHtmlParser.kt](../core-reader/src/main/kotlin/com/aitts/v2/reader/parser/EpubHtmlParser.kt) 新增 `EpubFootnoteExtractor.extractById(html, fragmentId)`（含空前置锚点向父级块/下一兄弟元素回退）、[ReadiumEngine.kt](../app/src/main/java/com/aitts/v2/reader/ReadiumEngine.kt) 新增 `loadFootnoteText`、前端拦截 `epub:type="noteref"` 点击并接入 [ReaderSearchAndNoteSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderSearchAndNoteSheets.kt) 原地注释弹窗 `ReaderFootnoteDialog`，同步打通嵌套目录 `#fragment` 跳转与「返回跳转前位置」胶囊 [ReaderChromeAndToc.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderChromeAndToc.kt) / [ReaderAnnotationHelper.kt](../app/src/main/java/com/aitts/v2/ui/reader/ReaderAnnotationHelper.kt)（回退跳转保留 `Locator.Locations.fragments`）。
+
+3. **Google Drive 登录全面优化与零门槛多通道连接（`:core-engine` & `:app`）**：
+   - 统一 [GoogleDriveClient.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleDriveClient.kt) 授权作用域为完整 `DRIVE_SCOPE`（清理无用 `DRIVE_READONLY_SCOPE`）。
+   - 扩展 [GoogleOAuthClientJsonParser.kt](../core-engine/src/main/kotlin/com/aitts/v2/engine/cloud/GoogleOAuthClientJsonParser.kt) 与单测 `GoogleOAuthClientJsonParserTest`：新增原生 `token.json` 与 `rclone.conf`（`type = drive`）解析，允许含 `refresh_token + client_id` 的配置一键自动连接并前置拦截缺 `client_id` 的残缺 `refresh_token`。
+   - 升级 [CloudAuthCoordinator.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudAuthCoordinator.kt)（引入 `androidx.browser:browser:1.8.0` Chrome Custom Tabs 启动 OAuth 流程并一键打开 Google Cloud Console）、[GoogleDriveRepository.kt](../app/src/main/java/com/aitts/v2/reader/GoogleDriveRepository.kt)（加密持久化草稿 OAuth `clientId/clientSecret` 至 `google_drive_draft_client_v1`）、[CloudFileManagerViewModel.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerViewModel.kt) 与 [CloudFileManagerSheets.kt](../app/src/main/java/com/aitts/v2/ui/reader/CloudFileManagerSheets.kt)（重设 Google 云盘连接卡，将免配置 SAF 主按钮置顶并配套 3 步配置向导）。
+
+4. **Qodo CLI 两轮审查与全部门禁验证（已达 2 轮止损上限）**：
+   - **Qodo 第 1 轮**（`operation_id: ca81e178-78c5-4cc7-964c-4c9052e14fee`）：检出 2 项 `introduced` `action_required` 缺陷——`51c49e40`（`parseRcloneConf` 允许无 `client_id` 的 `refresh_token` 导入导致后续无法续期）与 `d60d017b`（空注脚前置锚点提取失败且跳转回退丢失 `#fragment`），当轮全部修复并补充单测。
+   - **Qodo 第 2 轮**（`operation_id: a6637c71-551e-4bbb-9add-387b95bf1426`，`run_id: 8e07736e310149bd8e5357d3adc64851`，达 2 轮上限）：确认 `coverage.complete = True`、`51c49e40` 与 `d60d017b` 均已转为 **`resolved`**，且无任何新增 `action_required` 阻塞项；仅保留 1 项低概率 `remediation_recommended` 理论提示 `3897d404`（当注脚文本提取失败且同一本 EPUB 同时存在后缀冲突文件如 `notes.xhtml` 与 `OPS/notes.xhtml` 时，`firstOrNull` 后缀匹配可能命中前者），记入后续迭代观察边界。
+
+5. **最终全量门禁、R8 签名产物体积/哈希与 `pixel_34` 真包实测**：
+   - `python scripts/check_architecture.py`：退出码 `0`（`0 violations`；全仓 `src/` 含单测共 `170` 个 `.kt` 文件 / `27,407` 行）。
+   - `.\gradlew.bat qualityGate assembleR8Release --no-daemon`（全部代码修改后经 `flash` 子代理执行）：`BUILD SUCCESSFUL in 3m 36s`（退出码 `0`，`0` Kotlin/Java 编译警告与错误），`Detekt`、`Lint` 全部通过，**63/63 单元测试通过**（`:app:testCloudDebugUnitTest` `5`、`:core-engine:test` `38`、`:core-model:test` `6`、`:core-reader:test` `14`；0 跳过、0 失败、0 错误）。
+   - `cloud` R8 APK：[app-cloud-release.apk](../app/build/outputs/apk/cloud/release/app-cloud-release.apk)（交付件 `ai-tts-v2-v2.6.0-pre.1-cloud-r8-signed.apk`）— **`6,599,300`** 字节（SHA-256 `67452B0FD5191109BA41512F9415A27DFC0C7B316F49F02DB30DFA63562F1299`），`apksigner verify --print-certs` 退出码 `0`。
+   - `full` R8 APK：[app-full-release.apk](../app/build/outputs/apk/full/release/app-full-release.apk)（交付件 `ai-tts-v2-v2.6.0-pre.1-full-r8-signed.apk`）— **`30,290,302`** 字节（SHA-256 `35D5879C903D98EC25B19DF2E178D669C88EDC48FD2F1EE08C45971B7F5DC2D1`），`apksigner verify --print-certs` 退出码 `0`。
+   - **Android `pixel_34` 使用真实网盘 EPUB `chuangyue_11.epub` 单轮实测与 6 张人工核验截图**（`logcat -d *:E` 0 应用/Readium 崩溃）：
+     - `antigravity-records/screenshots/v2.6.0-pre.1/01_chuangyue11_fxl_center_tap.png`（FXL 封面居中点击呼出工具栏，不翻页不误触灯箱）
+     - `antigravity-records/screenshots/v2.6.0-pre.1/02_chuangyue11_toc_nested.png`（嵌套目录 31 项及多级子章节缩进跳转）
+     - `antigravity-records/screenshots/v2.6.0-pre.1/03_chuangyue11_body_fidelity.png`（《创约 11》第一章嵌入字体、悬挂标点、`#toc` 返回跳转前位置胶囊与精确页码统计）
+     - `antigravity-records/screenshots/v2.6.0-pre.1/04_chuangyue11_footnote_popup.png`（点击正文 `㊟` 标记弹出原地 `注释说明` 弹窗及底栏 `<ruby>` 假名/英语注音）
+     - `antigravity-records/screenshots/v2.6.0-pre.1/05_reader_layout_overlay_clean.png`（开启「阅读与排版设置」自动隐藏上下控制栏、正文稳定无抽搐）
+     - `antigravity-records/screenshots/v2.6.0-pre.1/06_gdrive_auth_card_v26.png`（重设计 Google 网盘连接卡：SAF 主按钮置顶、`JSON / rclone` 导入与 Custom Tabs 浏览器登录入口）
+   - 清理旧预发布 `v2.5.0-pre.1`，发布唯一最新预发布 **`v2.6.0-pre.1`** 随附双 R8 签名 APK。

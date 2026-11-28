@@ -69,6 +69,15 @@ class CloudFileManagerViewModel(private val container: AppContainer) : ViewModel
     private var listJob: Job? = null
 
     init {
+        val (draftId, draftSec) = container.googleDrive.loadDraftClientCredentials()
+        if (draftId.isNotBlank() || draftSec.isNotBlank()) {
+            _uiState.update {
+                it.copy(
+                    devClientId = draftId.ifBlank { it.devClientId },
+                    devClientSecret = draftSec
+                )
+            }
+        }
         viewModelScope.launch {
             container.googleDrive.authFlow.collect { auth ->
                 val account = auth.accountEmail.ifBlank { auth.accountName }.ifBlank { "Google 账号已连接" }

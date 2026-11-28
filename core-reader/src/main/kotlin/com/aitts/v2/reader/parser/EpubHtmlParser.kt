@@ -157,3 +157,34 @@ internal object EpubHtmlParser {
         }
     }
 }
+
+/**
+ * Extracts a single footnote/endnote element by fragment ID for in-place reader popups.
+ */
+object EpubFootnoteExtractor {
+    fun extractById(html: String, fragmentId: String): String {
+        val cleanId = fragmentId.trim()
+        if (html.isBlank() || cleanId.isEmpty()) return ""
+        return runCatching {
+            val doc = Jsoup.parse(html)
+            val el = doc.getElementById(cleanId) ?: return ""
+            val direct = cleanNoteText(el)
+            if (direct.isNotBlank()) return direct
+            val parentText = el.parent()
+                ?.takeIf { it.tagName().lowercase() in setOf("li", "p", "div", "aside", "dd") }
+                ?.let { cleanNoteText(it) }
+                .orEmpty()
+            if (parentText.isNotBlank()) return parentText
+            el.nextElementSibling()?.let { cleanNoteText(it) }.orEmpty()
+        }.getOrDefault("")
+    }
+
+    private fun cleanNoteText(el: Element): String {
+        val clone = el.clone()
+        clone.select("a").forEach { a ->
+            val txt = a.text().trim()
+            if (txt.isEmpty() || txt in setOf("⤶", "↩", "↑", "←")) a.remove()
+        }
+        return clone.text().replace(Regex("\\s+"), " ").trim()
+    }
+}

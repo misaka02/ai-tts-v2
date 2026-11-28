@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.result.IntentSenderRequest
+import androidx.browser.customtabs.CustomTabsIntent
 import com.aitts.v2.BuildConfig
 import com.aitts.v2.di.AppContainer
 import com.aitts.v2.engine.cloud.GoogleOAuthClientJsonParser
@@ -93,33 +94,40 @@ internal class CloudAuthCoordinator(
             }
             res.fold(
                 onSuccess = { parsed ->
-                    state.update {
-                        it.copy(
-                            devClientId = parsed.clientId,
-                            devClientSecret = parsed.clientSecret,
-                            errorMessage = null,
-                            statusMessage = "已导入 OAuth (${parsed.clientType})，请点「浏览器一键授权登录」"
+                    container.googleDrive.saveDraftClientCredentials(parsed.clientId, parsed.clientSecret)
+                    if (parsed.refreshToken.isNotBlank() || parsed.accessToken.isNotBlank()) {
+                        container.googleDrive.connectWithTokens(
+                            parsed.clientId, parsed.clientSecret, parsed.refreshToken, parsed.accessToken
+                        ).fold(
+                            onSuccess = {
+                                state.update {
+                                    it.copy(
+                                        devClientId = parsed.clientId, devClientSecret = parsed.clientSecret,
+                                        errorMessage = null, statusMessage = "已导入 (${parsed.clientType}) 并自动连接 Google Drive"
+                                    )
+                                }
+                            },
+                            onFailure = { err ->
+                                state.update {
+                                    it.copy(
+                                        devClientId = parsed.clientId, devClientSecret = parsed.clientSecret,
+                                        errorMessage = diagnoseNetworkOrOAuthError(err)
+                                    )
+                                }
+                            }
                         )
+                    } else {
+                        state.update {
+                            it.copy(
+                                devClientId = parsed.clientId, devClientSecret = parsed.clientSecret, errorMessage = null,
+                                statusMessage = "已导入 OAuth (${parsed.clientType}) 并持久化，请点「浏览器 OAuth 永久连接」"
+                            )
+                        }
                     }
                 },
-                onFailure = { err ->
-                    state.update { it.copy(errorMessage = "导入凭证失败: ${err.message}") }
-                }
+                onFailure = { err -> state.update { it.copy(errorMessage = "导入凭证失败: ${err.message}") } }
             )
         }
-    }
-
-    private fun readStreamUpTo(stream: java.io.InputStream, maxBytes: Int): ByteArray {
-        val out = java.io.ByteArrayOutputStream()
-        val buf = ByteArray(4096)
-        while (out.size() < maxBytes) {
-            val want = minOf(buf.size, maxBytes - out.size() + 1)
-            val count = stream.read(buf, 0, want)
-            if (count <= 0) break
-            out.write(buf, 0, count)
-            if (out.size() > maxBytes) error("凭证文件过大（超过 64 KB）")
-        }
-        return out.toByteArray()
     }
 
     fun startBrowserPkceGoogleAuth(context: Context) {
@@ -132,46 +140,31 @@ internal class CloudAuthCoordinator(
             }
             return
         }
+        container.googleDrive.saveDraftClientCredentials(cid, csec)
         state.update {
             it.copy(
-                isBusy = true,
-                isBrowserAuthWaiting = true,
-                pendingAuthUrl = "",
-                pastedCallbackUrl = "",
-                busyLabel = "请在浏览器中完成 Google 授权并允许跳转回应用...",
-                errorMessage = null
+                isBusy = true, isBrowserAuthWaiting = true, pendingAuthUrl = "", pastedCallbackUrl = "",
+                busyLabel = "请在浏览器中完成 Google 授权并允许跳转回应用...", errorMessage = null
             )
         }
         scope.launch {
             val result = container.googleDrive.authorizeInBrowser(cid, csec) { authUrl ->
                 state.update { it.copy(pendingAuthUrl = authUrl) }
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                try {
-                    context.startActivity(intent)
-                } catch (_: ActivityNotFoundException) {
-                    state.update { it.copy(statusMessage = "未能自动调起浏览器，请复制下方授权链接手动打开") }
-                }
+                launchAuthUrl(context, authUrl)
             }
             result.fold(
                 onSuccess = {
                     state.update {
                         it.copy(
-                            isBusy = false,
-                            isBrowserAuthWaiting = false,
-                            pendingAuthUrl = "",
-                            pastedCallbackUrl = "",
-                            busyLabel = "",
-                            statusMessage = "已通过浏览器连接 Google Drive（支持自动续期）"
+                            isBusy = false, isBrowserAuthWaiting = false, pendingAuthUrl = "", pastedCallbackUrl = "",
+                            busyLabel = "", statusMessage = "已通过浏览器连接 Google Drive（支持自动续期）"
                         )
                     }
                 },
                 onFailure = { err ->
                     state.update {
                         it.copy(
-                            isBusy = false,
-                            isBrowserAuthWaiting = false,
-                            pendingAuthUrl = "",
-                            busyLabel = "",
+                            isBusy = false, isBrowserAuthWaiting = false, pendingAuthUrl = "", busyLabel = "",
                             errorMessage = diagnoseNetworkOrOAuthError(err)
                         )
                     }
@@ -180,16 +173,28 @@ internal class CloudAuthCoordinator(
         }
     }
 
+    fun openGoogleCloudConsole(context: Context) {
+        launchAuthUrl(context, "https://console.cloud.google.com/apis/credentials")
+    }
+
+    private fun launchAuthUrl(context: Context, url: String) {
+        val uri = Uri.parse(url)
+        val customOk = runCatching { CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, uri) }.isSuccess
+        if (customOk) return
+        val fallback = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(fallback)
+        } catch (_: ActivityNotFoundException) {
+            state.update { it.copy(statusMessage = "未能自动调起浏览器，请复制授权链接手动打开") }
+        }
+    }
+
     fun cancelBrowserPkceAuth() {
         container.googleDrive.cancelPendingAuth()
         state.update {
             it.copy(
-                isBusy = false,
-                isBrowserAuthWaiting = false,
-                pendingAuthUrl = "",
-                pastedCallbackUrl = "",
-                busyLabel = "",
-                statusMessage = "已取消浏览器登录"
+                isBusy = false, isBrowserAuthWaiting = false, pendingAuthUrl = "", pastedCallbackUrl = "",
+                busyLabel = "", statusMessage = "已取消浏览器登录"
             )
         }
     }
@@ -289,34 +294,47 @@ internal class CloudAuthCoordinator(
         container.webDav.disconnect()
         state.update { it.copy(items = emptyList(), statusMessage = "已断开 WebDAV") }
     }
+}
 
-    private fun diagnosePlayServicesError(err: Throwable, sha1: String): String {
-        val api = err as? ApiException
-        val code = api?.statusCode
-        val rawMsg = api?.status?.statusMessage ?: api?.message ?: err.message.orEmpty()
-        return when (code) {
-            CommonStatusCodes.DEVELOPER_ERROR -> "Google Play 拒绝授权 (错误码 10: DEVELOPER_ERROR)：" +
-                "当前 APK 签名 (SHA-1: $sha1) 未在 Google Cloud Console 绑定包名 com.aitts.engine。\n" +
-                "请改用上方「浏览器 OAuth 永久登录」或「系统网盘直选」。"
-            CommonStatusCodes.NETWORK_ERROR -> "网络错误 (错误码 7)：无法连接 Google 服务，请确认代理/VPN 畅通。"
-            CommonStatusCodes.CANCELED -> if (rawMsg.contains("cancel", true)) {
-                "您取消了 Google Play 授权 (错误码 16)。"
-            } else {
-                "Play 授权未能完成 (错误码 16: $rawMsg)，常见原因为未绑定测试账号/SHA-1 或网络超时。建议改用「浏览器 OAuth」。"
-            }
-            12501 -> "您取消了 Google 账号授权 (错误码 12501)。"
-            else -> "Play 服务授权失败${code?.let { " (错误码 $it)" } ?: ""}：$rawMsg。建议改用「浏览器 OAuth」或「系统网盘直选」。"
-        }
+private fun readStreamUpTo(stream: java.io.InputStream, maxBytes: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(4096)
+    while (out.size() < maxBytes) {
+        val want = minOf(buf.size, maxBytes - out.size() + 1)
+        val count = stream.read(buf, 0, want)
+        if (count <= 0) break
+        out.write(buf, 0, count)
+        if (out.size() > maxBytes) error("凭证文件过大（超过 64 KB）")
     }
+    return out.toByteArray()
+}
 
-    private fun diagnoseNetworkOrOAuthError(err: Throwable): String {
-        val msg = err.message.orEmpty()
-        val isNet = err is UnknownHostException || err is SocketTimeoutException || err is ConnectException ||
-            msg.contains("Unable to resolve host", true) || msg.contains("timeout", true) || msg.contains("Failed to connect", true)
-        return if (isNet) {
-            "无法连接 Google 服务器（$msg）。请确认系统 VPN 已开启，或前往主页顶部「网络与代理设置」配置代理后重试。"
+private fun diagnosePlayServicesError(err: Throwable, sha1: String): String {
+    val api = err as? ApiException
+    val code = api?.statusCode
+    val rawMsg = api?.status?.statusMessage ?: api?.message ?: err.message.orEmpty()
+    return when (code) {
+        CommonStatusCodes.DEVELOPER_ERROR -> "Google Play 拒绝授权 (错误码 10: DEVELOPER_ERROR)：" +
+            "当前 APK 签名 (SHA-1: $sha1) 未在 Google Cloud Console 绑定包名 com.aitts.engine。\n" +
+            "请改用上方「浏览器 OAuth 永久登录」或「系统网盘直选」。"
+        CommonStatusCodes.NETWORK_ERROR -> "网络错误 (错误码 7)：无法连接 Google 服务，请确认代理/VPN 畅通。"
+        CommonStatusCodes.CANCELED -> if (rawMsg.contains("cancel", true)) {
+            "您取消了 Google Play 授权 (错误码 16)。"
         } else {
-            msg.ifBlank { "Google 登录失败，请重试" }
+            "Play 授权未能完成 (错误码 16: $rawMsg)，常见原因为未绑定测试账号/SHA-1 或网络超时。建议改用「浏览器 OAuth」。"
         }
+        12501 -> "您取消了 Google 账号授权 (错误码 12501)。"
+        else -> "Play 服务授权失败${code?.let { " (错误码 $it)" } ?: ""}：$rawMsg。建议改用「浏览器 OAuth」或「系统网盘直选」。"
+    }
+}
+
+private fun diagnoseNetworkOrOAuthError(err: Throwable): String {
+    val msg = err.message.orEmpty()
+    val isNet = err is UnknownHostException || err is SocketTimeoutException || err is ConnectException ||
+        msg.contains("Unable to resolve host", true) || msg.contains("timeout", true) || msg.contains("Failed to connect", true)
+    return if (isNet) {
+        "无法连接 Google 服务器（$msg）。请确认系统 VPN 已开启，或前往主页顶部「网络与代理设置」配置代理后重试。"
+    } else {
+        msg.ifBlank { "Google 登录失败，请重试" }
     }
 }

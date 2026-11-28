@@ -34,18 +34,37 @@ private const val MENU_SEARCH = 1007
 private const val MENU_LOOKUP = 1008
 private const val MAX_CUSTOM_FONT_BYTES = 24L * 1024 * 1024
 
-internal const val IMAGE_TAP_JS = """
+internal const val READER_INTERACTION_JS = """
 (function(){
   if (window.__aiTtsImgWired) return;
   window.__aiTtsImgWired = true;
   document.addEventListener('click', function(ev) {
     var bridge = window.AiTtsReaderBridge;
-    if (!bridge || !bridge.onImageTap) return;
+    if (!bridge) return;
     var t = ev.target;
+    var link = t && t.closest ? t.closest('a') : null;
+    if (link && bridge.onFootnoteTap) {
+      var epType = link.getAttribute('epub:type') || '';
+      if (epType.indexOf('noteref') >= 0 || link.classList.contains('noteref')) {
+        var href = link.getAttribute('href') || '';
+        if (href) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          bridge.onFootnoteTap(href);
+          return;
+        }
+      }
+    }
+    if (!bridge.onImageTap) return;
+    var bodyCls = document.body ? document.body.classList : null;
+    if (bodyCls && (bodyCls.contains('p-cover') || bodyCls.contains('p-image'))) return;
     var img = t && t.closest ? (t.closest('img') || t.closest('image')) : null;
     if (!img) return;
     var rect = img.getBoundingClientRect ? img.getBoundingClientRect() : null;
-    if (rect && rect.width > 0 && rect.height > 0 && rect.width < 32 && rect.height < 32) return;
+    if (rect && rect.width > 0 && rect.height > 0) {
+      if (rect.width < 32 && rect.height < 32) return;
+      if (rect.width >= window.innerWidth * 0.82 && rect.height >= window.innerHeight * 0.55) return;
+    }
     var src = img.getAttribute('src') || img.getAttribute('href') || img.getAttribute('xlink:href') || '';
     if (!src) return;
     ev.preventDefault();
@@ -58,7 +77,8 @@ internal const val IMAGE_TAP_JS = """
 internal class ReadiumJsBridge(
     private val baseHref: String,
     private val customFontPathProvider: () -> String,
-    private val onImageResolved: (String) -> Unit
+    private val onImageResolved: (String) -> Unit,
+    private val onFootnoteResolved: (String) -> Unit = {}
 ) {
     @Volatile
     private var cachedFontPath: String = ""
@@ -70,7 +90,14 @@ internal class ReadiumJsBridge(
     fun onImageTap(rawSrc: String) {
         val clean = rawSrc.trim()
         if (clean.isEmpty() || clean.startsWith("data:", ignoreCase = true)) return
-        onImageResolved(resolveHref(baseHref, clean))
+        onImageResolved(resolveHref(baseHref, clean, keepFragment = false))
+    }
+
+    @JavascriptInterface
+    fun onFootnoteTap(rawHref: String) {
+        val clean = rawHref.trim()
+        if (clean.isEmpty()) return
+        onFootnoteResolved(resolveHref(baseHref, clean, keepFragment = true))
     }
 
     @JavascriptInterface
@@ -94,38 +121,52 @@ internal class ReadiumJsBridge(
         return ChineseScriptConverter.convert(text, mode)
     }
 
-    private fun resolveHref(base: String, target: String): String {
-        val stripped = target.removePrefix("https://readium/").removePrefix("http://readium/")
-        if (target.startsWith("https://readium/") || target.startsWith("http://readium/")) {
-            return stripped.trimStart('/')
+    private fun resolveHref(base: String, target: String, keepFragment: Boolean): String {
+        val frag = if (keepFragment) target.substringAfter('#', "") else ""
+        val cleanTarget = target.substringBefore('#')
+        val stripped = cleanTarget.removePrefix("https://readium/").removePrefix("http://readium/")
+        val resolvedPath = if (cleanTarget.startsWith("https://readium/") || cleanTarget.startsWith("http://readium/")) {
+            stripped.trimStart('/')
+        } else {
+            runCatching {
+                val normBase = "/" + base.substringBefore('#').trimStart('/')
+                URI(normBase).resolve(stripped).path.trimStart('/')
+            }.getOrDefault(stripped.trimStart('/'))
         }
-        return runCatching {
-            val normBase = "/" + base.trimStart('/')
-            URI(normBase).resolve(stripped).path.trimStart('/')
-        }.getOrDefault(stripped.trimStart('/'))
+        return if (keepFragment && frag.isNotBlank()) "$resolvedPath#$frag" else resolvedPath
     }
 }
 
 internal fun handleEpubTapZone(
     settings: ReaderSettings,
     fx: Float,
+    fy: Float,
+    showChrome: Boolean,
+    isRtl: Boolean,
     nav: EpubNavigatorFragment,
     onCenter: () -> Unit
 ): Boolean {
-    if (settings.readingMode == ReaderReadingMode.SCROLL) {
+    if (showChrome || settings.readingMode == ReaderReadingMode.SCROLL) {
+        onCenter()
+        return true
+    }
+    if (fx in 0.28f..0.72f && fy in 0.20f..0.80f) {
         onCenter()
         return true
     }
     val anim = settings.pageAnimation == ReaderPageAnimation.SLIDE
+    fun turnVisualLeft(): Boolean = if (isRtl) nav.goForward(animated = anim) else nav.goBackward(animated = anim)
+    fun turnVisualRight(): Boolean = if (isRtl) nav.goBackward(animated = anim) else nav.goForward(animated = anim)
+
     return when (settings.tapZoneMode) {
         ReaderTapZoneMode.STANDARD -> when {
-            fx < 0.28f -> nav.goBackward(animated = anim)
-            fx > 0.72f -> nav.goForward(animated = anim)
+            fx < 0.28f -> turnVisualLeft()
+            fx > 0.72f -> turnVisualRight()
             else -> { onCenter(); true }
         }
         ReaderTapZoneMode.LEFT_HAND -> when {
-            fx < 0.28f -> nav.goForward(animated = anim)
-            fx > 0.72f -> nav.goBackward(animated = anim)
+            fx < 0.28f -> turnVisualRight()
+            fx > 0.72f -> turnVisualLeft()
             else -> { onCenter(); true }
         }
         ReaderTapZoneMode.ALL_NEXT -> nav.goForward(animated = anim)

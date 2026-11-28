@@ -10,16 +10,21 @@ import com.aitts.v2.reader.model.BookHighlight
 import com.aitts.v2.reader.removeHighlight
 import com.aitts.v2.reader.updateHighlightColor
 import com.aitts.v2.reader.updateHighlightNote
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import org.readium.r2.shared.publication.Locator
+import org.readium.r2.shared.publication.Publication
 import java.util.UUID
 
 /**
- * Coordinates bookmarks, EPUB highlights, notes, Markdown note export, and plain-text copy.
+ * Coordinates bookmarks, EPUB highlights, notes, footnote popups, Markdown note export, and plain-text copy.
  */
 internal class ReaderAnnotationHelper(
     private val container: AppContainer,
     private val bookId: String,
+    private val scope: CoroutineScope,
     private val state: MutableStateFlow<ReaderUiState>
 ) {
     fun toggleBookmark(overrideSnippet: String? = null, overrideBlock: Int? = null) {
@@ -106,5 +111,30 @@ internal class ReaderAnnotationHelper(
         val intent = BookNotesExporter.buildShareIntent(book)
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
+    }
+
+    fun openFootnote(resolvedHref: String, publication: Publication?, onNavigate: (Locator) -> Unit) {
+        val pub = publication ?: return
+        val prevLoc = state.value.currentLocatorJson.takeIf { it.isNotBlank() }
+        scope.launch {
+            val note = container.readiumEngine.loadFootnoteText(pub, resolvedHref)
+            if (note != null) {
+                state.update { it.copy(activeFootnote = note) }
+                return@launch
+            }
+            val cleanHref = resolvedHref.substringBefore('#').trimStart('/')
+            val frag = resolvedHref.substringAfter('#', "").trim()
+            val allLinks = pub.readingOrder + pub.resources
+            val link = allLinks.firstOrNull {
+                val lHref = it.href.toString().substringBefore('#').trimStart('/')
+                lHref == cleanHref || lHref.endsWith("/$cleanHref") || cleanHref.endsWith("/$lHref")
+            }
+            val baseLoc = link?.let { pub.locatorFromLink(it) } ?: return@launch
+            val loc = if (frag.isNotBlank()) {
+                baseLoc.copy(locations = baseLoc.locations.copy(fragments = listOf(frag)))
+            } else baseLoc
+            state.update { it.copy(jumpBackLocatorJson = prevLoc) }
+            onNavigate(loc)
+        }
     }
 }

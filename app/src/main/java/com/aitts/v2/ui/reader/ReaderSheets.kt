@@ -1,5 +1,6 @@
 package com.aitts.v2.ui.reader
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -50,6 +51,8 @@ fun ReaderAppearanceSheet(
     onImportFont: (android.net.Uri) -> Unit,
     onDismiss: () -> Unit
 ) {
+    BackHandler(enabled = true) { onDismiss() }
+
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(onImportFont)
     }

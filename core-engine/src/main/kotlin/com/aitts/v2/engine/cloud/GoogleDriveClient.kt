@@ -50,7 +50,7 @@ class GoogleDriveClient(
             .addQueryParameter("client_id", clientId.trim())
             .addQueryParameter("redirect_uri", redirectUri)
             .addQueryParameter("response_type", "code")
-            .addQueryParameter("scope", DRIVE_READONLY_SCOPE)
+            .addQueryParameter("scope", DRIVE_SCOPE)
             .addQueryParameter("access_type", "offline")
             .addQueryParameter("prompt", "consent")
             .addQueryParameter("code_challenge", pkce.codeChallenge)
@@ -332,7 +332,6 @@ class GoogleDriveClient(
         const val DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token"
         const val DEFAULT_API_URL = "https://www.googleapis.com"
         const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
-        private const val DRIVE_READONLY_SCOPE = DRIVE_SCOPE
         internal val DRIVE_ID_RE = Regex("^[a-zA-Z0-9._-]+$")
     }
 }

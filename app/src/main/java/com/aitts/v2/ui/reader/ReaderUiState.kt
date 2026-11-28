@@ -42,6 +42,8 @@ data class ReaderUiState(
     val editingHighlight: BookHighlight? = null,
     val selectedHighlightMenu: BookHighlight? = null,
     val longPressParagraph: Pair<Int, String>? = null,
+    val activeFootnote: Pair<String, String>? = null,
+    val jumpBackLocatorJson: String? = null,
     val showJumpDialog: Boolean = false,
     val showBookInfoDialog: Boolean = false,
     val autoScrollActive: Boolean = false,

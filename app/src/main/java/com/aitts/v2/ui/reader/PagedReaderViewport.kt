@@ -10,9 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +54,7 @@ fun PagedReaderViewport(
     pendingScrollBlockIndex: Int?,
     pendingScrollCharOffset: Int = 0,
     pendingLandOnLastPage: Boolean,
+    showChrome: Boolean = false,
     autoScrollActive: Boolean = false,
     autoScrollPaused: Boolean = false,
     pageTurnEvents: Flow<Int>,
@@ -72,13 +71,13 @@ fun PagedReaderViewport(
     val textMeasurer = rememberTextMeasurer()
     val coroutineScope = rememberCoroutineScope()
     val fontFamily = rememberResolvedReaderFontFamily(readerSettings)
+    val stableSysPad = rememberStableSystemBarPadding()
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .padding(stableSysPad)
     ) {
         val headerDp = if (readerSettings.showHeaderBar) 28 else 0
         val footerDp = if (readerSettings.showFooterBar) 28 else 0
@@ -219,7 +218,9 @@ fun PagedReaderViewport(
                             colors = colors,
                             maxImageHeightDp = maxImageDp,
                             activeTtsBlockIndex = activeTtsBlockIndex,
-                            onTapZone = { fx -> handleTapZone(readerSettings.tapZoneMode, fx, ::turnPage, onTapCenter) },
+                            onTapZone = { fx, fy ->
+                                handleTapZone(readerSettings.tapZoneMode, fx, fy, showChrome, ::turnPage, onTapCenter)
+                            },
                             onLongPressBlock = onLongPressBlock,
                             loadImage = loadImage,
                             onImageClick = onImageClick
@@ -248,9 +249,15 @@ fun PagedReaderViewport(
 internal fun handleTapZone(
     mode: ReaderTapZoneMode,
     fractionX: Float,
+    fractionY: Float = 0.5f,
+    showChrome: Boolean = false,
     turnPage: (Int) -> Unit,
     onCenter: () -> Unit
 ) {
+    if (showChrome || (fractionX in 0.28f..0.72f && fractionY in 0.20f..0.80f)) {
+        onCenter()
+        return
+    }
     when (mode) {
         ReaderTapZoneMode.STANDARD -> when {
             fractionX < 0.28f -> turnPage(-1)
@@ -275,7 +282,7 @@ private fun SingleBookPage(
     colors: ResolvedReaderColors,
     maxImageHeightDp: Int,
     activeTtsBlockIndex: Int,
-    onTapZone: (Float) -> Unit,
+    onTapZone: (Float, Float) -> Unit,
     onLongPressBlock: (Int, String) -> Unit,
     loadImage: suspend (String) -> Bitmap?,
     onImageClick: (String, Bitmap) -> Unit
@@ -285,8 +292,9 @@ private fun SingleBookPage(
             .fillMaxSize()
             .pointerInput(page.pageIndex) {
                 detectTapGestures { offset ->
-                    val fraction = if (size.width > 0) offset.x / size.width else 0.5f
-                    onTapZone(fraction)
+                    val fx = if (size.width > 0) offset.x / size.width else 0.5f
+                    val fy = if (size.height > 0) offset.y / size.height else 0.5f
+                    onTapZone(fx, fy)
                 }
             }
             .padding(horizontal = settings.horizontalPaddingDp.dp),
@@ -301,7 +309,7 @@ private fun SingleBookPage(
                 fontFamily = fontFamily,
                 colors = colors,
                 maxImageHeightDp = maxImageHeightDp,
-                onTap = onTapZone,
+                onTap = { fx -> onTapZone(fx, 0.5f) },
                 onLongPress = { txt -> onLongPressBlock(slice.blockIndex, txt) },
                 loadImage = loadImage,
                 onImageClick = onImageClick

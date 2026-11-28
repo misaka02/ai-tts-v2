@@ -22,7 +22,7 @@ data class ReadingProgress(
 ) {
     val progressPercent: Int
         get() {
-            if (totalProgression > 0f) {
+            if (locatorJson.isNotBlank() || totalProgression > 0f) {
                 return (totalProgression * 100f).toInt().coerceIn(0, 100)
             }
             val total = totalChapters.coerceAtLeast(1)

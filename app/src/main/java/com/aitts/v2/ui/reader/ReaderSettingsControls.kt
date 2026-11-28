@@ -23,9 +23,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,8 +49,15 @@ fun StepperSliderRow(
     step: Float,
     onValueChange: (Float) -> Unit
 ) {
-    var draft by remember(value) { mutableFloatStateOf(value.coerceIn(valueRange.start, valueRange.endInclusive)) }
+    val minVal = valueRange.start
+    val maxVal = valueRange.endInclusive
+    var isDragging by remember { mutableStateOf(false) }
+    var draft by remember { mutableFloatStateOf(value.coerceIn(minVal, maxVal)) }
     var lastEmitMs by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(value, isDragging) {
+        if (!isDragging) draft = value.coerceIn(minVal, maxVal)
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -71,7 +80,8 @@ fun StepperSliderRow(
         ) {
             IconButton(
                 onClick = {
-                    val next = (draft - step).coerceIn(valueRange.start, valueRange.endInclusive)
+                    val next = (draft - step).coerceIn(minVal, maxVal)
+                    isDragging = false
                     draft = next
                     onValueChange(next)
                 },
@@ -82,6 +92,7 @@ fun StepperSliderRow(
             Slider(
                 value = draft,
                 onValueChange = { raw ->
+                    isDragging = true
                     draft = raw
                     val now = System.currentTimeMillis()
                     if (now - lastEmitMs >= 95L) {
@@ -89,13 +100,17 @@ fun StepperSliderRow(
                         onValueChange(raw)
                     }
                 },
-                onValueChangeFinished = { onValueChange(draft) },
+                onValueChangeFinished = {
+                    isDragging = false
+                    onValueChange(draft)
+                },
                 valueRange = valueRange,
                 modifier = Modifier.weight(1f)
             )
             IconButton(
                 onClick = {
-                    val next = (draft + step).coerceIn(valueRange.start, valueRange.endInclusive)
+                    val next = (draft + step).coerceIn(minVal, maxVal)
+                    isDragging = false
                     draft = next
                     onValueChange(next)
                 },

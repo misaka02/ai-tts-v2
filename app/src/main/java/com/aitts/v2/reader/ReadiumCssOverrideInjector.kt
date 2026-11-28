@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 /**
  * Generates idempotent CSS + JS overrides injected into Readium WebViews to enforce typography controls
- * that ReadiumCSS (`cjk-horizontal` / base) ignores or locks behind built-in conditions.
+ * without clobbering publisher-embedded fonts, ruby, emphasis dots, or hanging punctuation.
  */
 object ReadiumCssOverrideInjector {
 
@@ -24,11 +24,16 @@ object ReadiumCssOverrideInjector {
         val headingWeight = (weight + 200).coerceIn(600, 900)
 
         sb.append("html, body { background-color: $resolvedBgHex !important; color: $resolvedTextHex !important; }\n")
-        sb.append("h1, h2, h3, h4, h5, h6 { color: $resolvedTextHex !important; font-weight: $headingWeight !important; }\n")
-        sb.append("body, p, div, li, span, dd { font-weight: $weight !important; }\n")
+        sb.append("h1, h2, h3, h4, h5, h6 { color: $resolvedTextHex; }\n")
+        if (weight != 400) {
+            sb.append("body, p, div, li, dd { font-weight: $weight !important; }\n")
+            sb.append("h1, h2, h3, h4, h5, h6 { font-weight: $headingWeight !important; }\n")
+        }
 
-        if (hasCustomFont || !settings.publisherStyles) {
-            sb.append("body, p, div, li, span, h1, h2, h3, h4 { font-family: $fontStack !important; }\n")
+        if (hasCustomFont) {
+            sb.append("body, p, div, li, dd, h1, h2, h3, h4, rt { font-family: $fontStack !important; }\n")
+        } else if (!settings.publisherStyles) {
+            sb.append("body, p, div, li, dd, h1, h2, h3, h4 { font-family: $fontStack !important; }\n")
         }
 
         if (!settings.publisherStyles) {
@@ -51,7 +56,10 @@ object ReadiumCssOverrideInjector {
         }
         val indent = "%.1f".format(java.util.Locale.US, settings.effectiveIndentEm().coerceIn(0f, 3f))
         val pSpace = settings.paragraphSpacingDp.toInt().coerceIn(0, 40)
-        sb.append("p { text-indent: ${indent}em !important; margin-top: ${pSpace}px !important; margin-bottom: ${pSpace}px !important; }\n")
+        sb.append(
+            "p:not(.hanging-punc):not(.img):not(.align-right):not(.align-end) " +
+                "{ text-indent: ${indent}em !important; margin-top: ${pSpace}px !important; margin-bottom: ${pSpace}px !important; }\n"
+        )
 
         val alignCss = when (settings.textAlign) {
             ReaderTextAlign.START -> "left"
@@ -60,7 +68,7 @@ object ReadiumCssOverrideInjector {
             ReaderTextAlign.AUTO -> null
         }
         if (alignCss != null) {
-            sb.append("body, p, div { text-align: $alignCss !important; }\n")
+            sb.append("body, p:not(.img):not(.align-right):not(.align-end):not(.label-logo) { text-align: $alignCss !important; }\n")
         }
         if (settings.hyphens) {
             sb.append("body, p, div { -webkit-hyphens: auto !important; hyphens: auto !important; }\n")

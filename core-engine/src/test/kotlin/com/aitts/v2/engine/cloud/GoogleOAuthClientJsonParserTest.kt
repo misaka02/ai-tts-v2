@@ -25,6 +25,30 @@ class GoogleOAuthClientJsonParserTest {
     }
 
     @Test
+    fun `parses rclone conf drive section and authorized user json`() {
+        val rclone = """
+            [gdrive]
+            type = drive
+            client_id = 999-rclone.apps.googleusercontent.com
+            client_secret = sec-rclone
+            scope = drive
+            token = {"access_token":"ya29.tok","token_type":"Bearer","refresh_token":"1//ref-tok"}
+        """.trimIndent()
+        val parsed = GoogleOAuthClientJsonParser.parse(rclone).getOrThrow()
+        assertEquals("999-rclone.apps.googleusercontent.com", parsed.clientId)
+        assertEquals("sec-rclone", parsed.clientSecret)
+        assertEquals("1//ref-tok", parsed.refreshToken)
+        assertEquals("ya29.tok", parsed.accessToken)
+        assertEquals("rclone", parsed.clientType)
+
+        val tokenJson = """{"client_id":"111.apps.googleusercontent.com","refresh_token":"1//r2"}"""
+        val parsedTok = GoogleOAuthClientJsonParser.parse(tokenJson).getOrThrow()
+        assertEquals("111.apps.googleusercontent.com", parsedTok.clientId)
+        assertEquals("1//r2", parsedTok.refreshToken)
+        assertEquals("token_json", parsedTok.clientType)
+    }
+
+    @Test
     fun `rejects web OAuth json incompatible with loopback PKCE`() {
         val raw = """
             {
@@ -41,6 +65,8 @@ class GoogleOAuthClientJsonParserTest {
 
     @Test
     fun `rejects invalid or missing client_id json cleanly`() {
+        val rcloneNoClient = "[gd]\ntype = drive\ntoken = {\"access_token\":\"a\",\"refresh_token\":\"r\"}"
+        assertTrue(GoogleOAuthClientJsonParser.parse(rcloneNoClient).isFailure)
         assertTrue(GoogleOAuthClientJsonParser.parse("{}").isFailure)
         assertTrue(GoogleOAuthClientJsonParser.parse("not json").isFailure)
         assertTrue(GoogleOAuthClientJsonParser.parse("").isFailure)

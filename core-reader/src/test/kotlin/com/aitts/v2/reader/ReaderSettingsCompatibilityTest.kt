@@ -37,6 +37,7 @@ class ReaderSettingsCompatibilityTest {
         assertEquals(ReaderScriptConvert.NONE, decoded.scriptConvert)
         assertEquals(ReaderPageAnimation.SLIDE, decoded.pageAnimation)
         assertTrue(decoded.leftEdgeBrightnessGesture)
+        assertTrue(decoded.publisherStyles)
         assertTrue(decoded.showHeaderBar)
         assertTrue(decoded.showFooterBar)
     }

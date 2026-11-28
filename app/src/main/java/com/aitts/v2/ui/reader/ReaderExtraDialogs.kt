@@ -287,7 +287,11 @@ fun ReaderEdgeBrightnessStrip(
 }
 
 @Composable
-fun ReaderJumpBackChip(onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ReaderJumpBackChip(
+    label: String = "回到朗读处",
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Surface(
         onClick = onClick,
         shape = CircleShape,
@@ -301,7 +305,7 @@ fun ReaderJumpBackChip(onClick: () -> Unit, modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(Icons.Outlined.GraphicEq, contentDescription = null)
-            Text("回到朗读处", style = MaterialTheme.typography.labelMedium)
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
     }
 }

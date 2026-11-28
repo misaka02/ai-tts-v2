@@ -105,7 +105,7 @@ data class ReaderSettings(
     val brightness: Float = -1f,
     val keepScreenOn: Boolean = true,
     val fullscreenImmersive: Boolean = false,
-    val publisherStyles: Boolean = false,
+    val publisherStyles: Boolean = true,
     val textAlign: ReaderTextAlign = ReaderTextAlign.START,
     val letterSpacingEm: Float = 0f,
     val customFontPath: String = "",
