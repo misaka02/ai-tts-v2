@@ -8,3 +8,5 @@ local.properties
 *.iml
 .DS_Store
 antigravity-records/*.tmp
+*.jks
+*.keystore

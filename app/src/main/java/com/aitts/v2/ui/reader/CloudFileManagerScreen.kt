@@ -3,45 +3,38 @@ package com.aitts.v2.ui.reader
 import android.app.Activity
 import android.text.format.Formatter
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,13 +42,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aitts.v2.engine.cloud.CloudFileNode
-import com.aitts.v2.engine.cloud.SyncDirection
 import com.aitts.v2.ui.theme.InkPaperCard
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,10 +71,17 @@ fun CloudFileManagerScreen(
         uri?.let { viewModel.auth.importClientSecretJson(context, it) }
     }
     val safMultiPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        viewModel.importMultiViaSaf(uris) { rec -> rec?.let { onBookImported(it.id) } }
+        viewModel.sync.importMultiViaSaf(uris) { rec -> rec?.let { onBookImported(it.id) } }
+    }
+    val uploadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        viewModel.sync.uploadFilesToCurrentFolder(uris)
     }
     val safTreePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let(viewModel::bindCustomSyncFolder)
+    }
+
+    BackHandler(enabled = state.selectedIds.isNotEmpty() || state.breadcrumbs.size > 1) {
+        if (state.selectedIds.isNotEmpty()) viewModel.clearSelection() else viewModel.navigateUp()
     }
 
     LaunchedEffect(state.statusMessage) {
@@ -93,23 +91,43 @@ fun CloudFileManagerScreen(
         }
     }
 
+    val isReady = state.source == FileSourceTab.LOCAL ||
+        (state.source == FileSourceTab.GOOGLE_DRIVE && state.driveConnected) ||
+        (state.source == FileSourceTab.WEBDAV && state.webDavConnected)
+
     Scaffold(
         topBar = {
             TopAppBar(
                 modifier = Modifier.statusBarsPadding(),
-                title = { Text("文件与网盘中心") },
+                title = { Text(if (state.selectedIds.isNotEmpty()) "已选 ${state.selectedIds.size} 项" else "文件与网盘中心") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回") }
+                    if (state.selectedIds.isNotEmpty()) {
+                        IconButton(onClick = viewModel::clearSelection) { Icon(Icons.Outlined.Close, contentDescription = "取消多选") }
+                    } else {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回") }
+                    }
                 },
                 actions = {
-                    IconButton(onClick = { safMultiPicker.launch(arrayOf("*/*")) }) {
-                        Icon(Icons.Outlined.FolderOpen, contentDescription = "系统文件/网盘直选")
-                    }
-                    IconButton(onClick = { showNewFolder = true }) {
-                        Icon(Icons.Outlined.CreateNewFolder, contentDescription = "新建文件夹")
-                    }
-                    IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
+                    if (state.selectedIds.isNotEmpty()) {
+                        IconButton(onClick = viewModel::selectAllVisible) { Icon(Icons.Outlined.SelectAll, contentDescription = "全选") }
+                        IconButton(onClick = viewModel.sync::batchImportSelected) {
+                            Icon(Icons.Outlined.Download, contentDescription = "批量导入书架")
+                        }
+                        IconButton(onClick = { viewModel.sync.setBatchDeleteConfirm(true) }) {
+                            Icon(Icons.Outlined.DeleteOutline, contentDescription = "批量删除")
+                        }
+                    } else if (isReady) {
+                        IconButton(onClick = { uploadPicker.launch(arrayOf("*/*")) }) {
+                            Icon(Icons.Outlined.DriveFolderUpload, contentDescription = "上传到当前目录")
+                        }
+                        IconButton(onClick = { showNewFolder = true }) {
+                            Icon(Icons.Outlined.CreateNewFolder, contentDescription = "新建文件夹")
+                        }
+                        IconButton(onClick = viewModel::refresh) { Icon(Icons.Outlined.Refresh, contentDescription = "刷新") }
+                    } else {
+                        IconButton(onClick = { safMultiPicker.launch(arrayOf("*/*")) }) {
+                            Icon(Icons.Outlined.FolderOpen, contentDescription = "系统文件直选")
+                        }
                     }
                 }
             )
@@ -123,7 +141,12 @@ fun CloudFileManagerScreen(
             }
 
             if (state.isBusy || state.isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                val prog = state.busyProgress
+                if (prog != null) {
+                    LinearProgressIndicator(progress = { prog }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
                 if (state.busyLabel.isNotBlank()) {
                     Text(
                         text = state.busyLabel,
@@ -134,210 +157,147 @@ fun CloudFileManagerScreen(
                 }
             }
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                item {
-                    when (state.source) {
-                        FileSourceTab.LOCAL -> InkPaperCard(padding = 12.dp) {
-                            Text("本地专有目录：${state.dedicatedDirLabel}", style = MaterialTheme.typography.titleSmall)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { viewModel.runSync(SyncDirection.TWO_WAY) }, modifier = Modifier.weight(1f)) {
-                                    Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.size(4.dp))
-                                    Text("扫描同步到书架")
-                                }
-                                OutlinedButton(onClick = { safTreePicker.launch(null) }) { Text("更换目录") }
-                            }
-                        }
-                        FileSourceTab.GOOGLE_DRIVE -> if (!state.driveConnected) {
-                            val (pkgName, sha1) = remember { viewModel.auth.getPackageAndSha1Info() }
-                            GoogleDriveAuthCard(
-                                clientId = state.devClientId,
-                                clientSecret = state.devClientSecret,
-                                redirectUri = state.devRedirectUri,
-                                errorMessage = state.errorMessage,
-                                isBusy = state.isBusy,
-                                isBrowserWaiting = state.isBrowserAuthWaiting,
-                                pendingAuthUrl = state.pendingAuthUrl,
-                                pastedCallbackUrl = state.pastedCallbackUrl,
-                                packageName = pkgName,
-                                signingSha1 = sha1,
-                                onUpdateClient = { id, sec, redir ->
-                                    viewModel.auth.updateDevInputs(cid = id, sec = sec, redir = redir)
-                                },
-                                onUpdatePastedUrl = { pasted -> viewModel.auth.updateDevInputs(pastedUrl = pasted) },
-                                onImportJson = { jsonPicker.launch(arrayOf("*/*")) },
-                                onOpenPasteDialog = { viewModel.auth.setDevAuthSheet(showPaste = true) },
-                                onOpenCloudConsole = {
-                                    viewModel.auth.openExternalUrl(context, "https://console.cloud.google.com/apis/credentials")
-                                },
-                                onBrowserSignIn = { ext -> viewModel.auth.startBrowserPkceGoogleAuth(context, ext) },
-                                onReopenExternalBrowser = { viewModel.auth.reopenPendingAuthInExternalBrowser(context) },
-                                onCopyAuthUrl = { viewModel.auth.copyPendingAuthUrl(context) },
-                                onSubmitManualCallback = viewModel.auth::submitManualCallbackUrl,
-                                onCancelBrowserSignIn = viewModel.auth::cancelBrowserPkceAuth,
-                                onOneTapSignIn = {
-                                    if (activity != null) {
-                                        viewModel.auth.startOneTapGoogleAuth(activity) { authLauncher.launch(it) }
-                                    }
-                                },
-                                onCopySigningInfo = { viewModel.auth.copyPackageAndSha1(context) },
-                                onOpenSafPicker = { safMultiPicker.launch(arrayOf("*/*")) },
-                                onOpenDevTokenSheet = { viewModel.auth.setDevAuthSheet(showDev = true) }
-                            )
-                        } else {
-                            CloudConnectedBar(
-                                label = "已连接：${state.driveAccount}",
-                                onSync = { viewModel.runSync(SyncDirection.TWO_WAY) },
-                                onDisconnect = viewModel.auth::disconnectGoogle
-                            )
-                        }
-                        FileSourceTab.WEBDAV -> if (!state.webDavConnected) {
-                            WebDavConnectCard(
-                                url = state.webDavUrlInput,
-                                user = state.webDavUserInput,
-                                pass = state.webDavPassInput,
-                                rootPath = state.webDavRootInput,
-                                isBusy = state.isBusy,
-                                onUpdate = viewModel.auth::updateWebDavInputs,
-                                onConnect = { viewModel.auth.connectWebDav { viewModel.refresh() } }
-                            )
-                        } else {
-                            CloudConnectedBar(
-                                label = "WebDAV：${state.webDavEndpoint}",
-                                onSync = { viewModel.runSync(SyncDirection.TWO_WAY) },
-                                onDisconnect = viewModel.auth::disconnectWebDav
-                            )
-                        }
-                    }
+            if (isReady) {
+                val syncTarget = when (state.source) {
+                    FileSourceTab.LOCAL -> state.dedicatedDirLabel
+                    FileSourceTab.GOOGLE_DRIVE -> state.driveSyncFolderLabel
+                    FileSourceTab.WEBDAV -> state.webDavSyncFolderLabel
                 }
+                val titleLabel = when (state.source) {
+                    FileSourceTab.LOCAL -> state.dedicatedDirLabel
+                    FileSourceTab.GOOGLE_DRIVE -> state.driveAccount
+                    FileSourceTab.WEBDAV -> state.webDavEndpoint
+                }
+                CloudStatusActionStrip(
+                    source = state.source,
+                    title = titleLabel,
+                    syncTargetLabel = syncTarget,
+                    onOpenSync = { viewModel.sync.setSyncOptionsSheet(true) },
+                    onScanMoon = if (state.source == FileSourceTab.GOOGLE_DRIVE) {
+                        { viewModel.sync.scanMoonReaderLibrary() }
+                    } else null,
+                    secondaryActionLabel = if (state.source == FileSourceTab.LOCAL) "更换目录" else "断开",
+                    onSecondaryAction = {
+                        when (state.source) {
+                            FileSourceTab.LOCAL -> safTreePicker.launch(null)
+                            FileSourceTab.GOOGLE_DRIVE -> viewModel.auth.disconnectGoogle()
+                            FileSourceTab.WEBDAV -> viewModel.auth.disconnectWebDav()
+                        }
+                    }
+                )
+                BreadcrumbFilterBar(
+                    state = state,
+                    showSortMenu = showSortMenu,
+                    onToggleSortMenu = { showSortMenu = it },
+                    viewModel = viewModel
+                )
+            }
 
-                val isReady = state.source == FileSourceTab.LOCAL ||
-                    (state.source == FileSourceTab.GOOGLE_DRIVE && state.driveConnected) ||
-                    (state.source == FileSourceTab.WEBDAV && state.webDavConnected)
+            if (!state.errorMessage.isNullOrBlank() && isReady) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = state.errorMessage.orEmpty(),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+            }
 
-                if (isReady) {
+            val dirFolders = remember(state.items) { state.items.filter { it.isFolder } }
+            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                if (!isReady) {
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                state.breadcrumbs.forEachIndexed { idx, crumb ->
-                                    FilterChip(
-                                        selected = idx == state.breadcrumbs.lastIndex,
-                                        onClick = { viewModel.navigateToBreadcrumb(idx) },
-                                        label = { Text(crumb.label) }
-                                    )
-                                }
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = state.searchQuery,
-                                    onValueChange = viewModel::updateSearch,
-                                    singleLine = true,
-                                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                                    placeholder = { Text("过滤文件名") },
-                                    modifier = Modifier.weight(1f)
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            if (state.source == FileSourceTab.GOOGLE_DRIVE) {
+                                val (pkgName, sha1) = remember { viewModel.auth.getPackageAndSha1Info() }
+                                GoogleDriveAuthCard(
+                                    clientId = state.devClientId, clientSecret = state.devClientSecret,
+                                    redirectUri = state.devRedirectUri, errorMessage = state.errorMessage, isBusy = state.isBusy,
+                                    isBrowserWaiting = state.isBrowserAuthWaiting, pendingAuthUrl = state.pendingAuthUrl,
+                                    pastedCallbackUrl = state.pastedCallbackUrl, packageName = pkgName, signingSha1 = sha1,
+                                    onUpdateClient = { id, sec, redir ->
+                                        viewModel.auth.updateDevInputs(cid = id, sec = sec, redir = redir)
+                                    },
+                                    onUpdatePastedUrl = { pasted -> viewModel.auth.updateDevInputs(pastedUrl = pasted) },
+                                    onImportJson = { jsonPicker.launch(arrayOf("*/*")) },
+                                    onOpenPasteDialog = { viewModel.auth.setDevAuthSheet(showPaste = true) },
+                                    onOpenCloudConsole = {
+                                        viewModel.auth.openExternalUrl(context, "https://console.cloud.google.com/apis/credentials")
+                                    },
+                                    onBrowserSignIn = { ext -> viewModel.auth.startBrowserPkceGoogleAuth(context, ext) },
+                                    onReopenExternalBrowser = { viewModel.auth.reopenPendingAuthInExternalBrowser(context) },
+                                    onCopyAuthUrl = { viewModel.auth.copyPendingAuthUrl(context) },
+                                    onSubmitManualCallback = viewModel.auth::submitManualCallbackUrl,
+                                    onCancelBrowserSignIn = viewModel.auth::cancelBrowserPkceAuth,
+                                    onOneTapSignIn = {
+                                        if (activity != null) viewModel.auth.startOneTapGoogleAuth(activity) { authLauncher.launch(it) }
+                                    },
+                                    onCopySigningInfo = { viewModel.auth.copyPackageAndSha1(context) },
+                                    onOpenSafPicker = { safMultiPicker.launch(arrayOf("*/*")) },
+                                    onOpenDevTokenSheet = { viewModel.auth.setDevAuthSheet(showDev = true) }
                                 )
-                                FilterChip(selected = state.ebooksOnly, onClick = viewModel::toggleEbooksOnly, label = { Text("电子书") })
-                                TextButton(onClick = { showSortMenu = true }) { Text(state.sortField.label) }
-                                DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                                    FileSortField.entries.forEach { f ->
-                                        DropdownMenuItem(
-                                            text = { Text(f.label) },
-                                            onClick = { viewModel.setSortField(f); showSortMenu = false }
-                                        )
-                                    }
-                                }
-                            }
-                            if (state.selectedIds.isNotEmpty()) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("已选 ${state.selectedIds.size} 项", style = MaterialTheme.typography.labelMedium)
-                                    Button(onClick = viewModel::batchImportSelected) { Text("批量导入书架") }
-                                    TextButton(onClick = viewModel::clearSelection) { Text("取消") }
-                                }
-                            }
-                        }
-                    }
-
-                    if (!state.errorMessage.isNullOrBlank()) {
-                        item {
-                            InkPaperCard(padding = 12.dp) {
-                                Text(
-                                    text = state.errorMessage.orEmpty(),
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-
-                    if (state.items.isEmpty() && !state.isLoading) {
-                        item {
-                            InkPaperCard(padding = 20.dp) {
-                                Text("当前目录暂无匹配文件，可直接点右上角目录按钮从手机或第三方网盘多选直导。")
-                            }
-                        }
-                    } else {
-                        items(state.items, key = { it.id }) { node ->
-                            val sizeLabel = if (node.isFolder) {
-                                "目录"
                             } else {
-                                Formatter.formatShortFileSize(context, node.sizeBytes)
+                                WebDavConnectCard(
+                                    url = state.webDavUrlInput, user = state.webDavUserInput,
+                                    pass = state.webDavPassInput, rootPath = state.webDavRootInput, isBusy = state.isBusy,
+                                    onUpdate = viewModel.auth::updateWebDavInputs,
+                                    onConnect = { viewModel.auth.connectWebDav { viewModel.refresh() } }
+                                )
                             }
-                            FileNodeRow(
-                                node = node,
-                                selected = node.id in state.selectedIds,
-                                formattedSize = sizeLabel,
-                                onToggleSelect = { viewModel.toggleSelect(node.id) },
-                                onClick = {
-                                    if (node.isFolder) viewModel.openFolder(node)
-                                    else viewModel.importFileNode(node, onBookImported)
-                                },
-                                onRename = { renameTarget = node },
-                                onDelete = { deleteTarget = node }
-                            )
                         }
+                    }
+                } else if (state.items.isEmpty() && !state.isLoading) {
+                    item {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            InkPaperCard(padding = 20.dp) {
+                                Text(
+                                    text = "当前目录暂无匹配文件，可点上方上传按钮传书或取消「电子书」查看全部文件。",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                OutlinedButton(onClick = { safMultiPicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("从系统文件选择器直接导入书籍")
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    items(state.items, key = { it.id }) { node ->
+                        val sizeLabel = if (node.isFolder) "目录" else Formatter.formatShortFileSize(context, node.sizeBytes)
+                        CloudFileListItem(
+                            node = node,
+                            source = state.source,
+                            selected = node.id in state.selectedIds,
+                            selectionMode = state.selectedIds.isNotEmpty(),
+                            isImported = viewModel.isNodeImported(node),
+                            formattedSize = sizeLabel,
+                            hasFoldersInDir = dirFolders.any { it.id != node.id },
+                            onToggleSelect = { viewModel.toggleSelect(node.id) },
+                            onClick = {
+                                if (node.isFolder) viewModel.openFolder(node) else viewModel.sync.importFileNode(node, onBookImported)
+                            },
+                            onDownloadLocal = { viewModel.sync.downloadNodeToLocalSync(node) },
+                            onScanMoonHere = if (state.source == FileSourceTab.GOOGLE_DRIVE) {
+                                {
+                                    val parent = state.breadcrumbs.lastOrNull()
+                                    viewModel.sync.scanMoonReaderLibrary(parent?.idOrPath, parent?.label)
+                                }
+                            } else null,
+                            onMoveToFolder = { viewModel.sync.openMoveDialog(node) },
+                            onRename = { renameTarget = node },
+                            onDelete = { deleteTarget = node }
+                        )
                     }
                 }
             }
         }
     }
 
-    if (showNewFolder) {
-        TextInputDialog("新建文件夹", "", "文件夹名称", { showNewFolder = false; viewModel.createFolder(it) }, { showNewFolder = false })
-    }
-    renameTarget?.let { target ->
-        TextInputDialog("重命名", target.name, "新名称", { renameTarget = null; viewModel.renameNode(target, it) }, { renameTarget = null })
-    }
-    deleteTarget?.let { target ->
-        DeleteFileConfirmDialog(target, { deleteTarget = null; viewModel.deleteNode(target) }, { deleteTarget = null })
-    }
-    if (state.showDevAuthSheet) {
-        DevTokenConnectDialog(
-            clientId = state.devClientId,
-            clientSecret = state.devClientSecret,
-            refreshToken = state.devRefreshToken,
-            accessToken = state.devAccessToken,
-            onUpdate = { cid, sec, ref, acc ->
-                viewModel.auth.updateDevInputs(cid = cid, sec = sec, ref = ref, tok = acc)
-            },
-            onOpenPlayground = { viewModel.auth.openExternalUrl(context, "https://developers.google.com/oauthplayground") },
-            onConnect = viewModel.auth::connectGoogleViaToken,
-            onDismiss = { viewModel.auth.setDevAuthSheet(showDev = false) }
-        )
-    }
-    if (state.showPasteCredsSheet) {
-        PasteCredentialsDialog(
-            onImportText = viewModel.auth::importCredentialsFromText,
-            onDismiss = { viewModel.auth.setDevAuthSheet(showPaste = false) }
-        )
-    }
+    CloudManagerDialogs(
+        state = state, viewModel = viewModel,
+        showNewFolder = showNewFolder, onDismissNewFolder = { showNewFolder = false },
+        renameTarget = renameTarget, onDismissRename = { renameTarget = null },
+        deleteTarget = deleteTarget, onDismissDelete = { deleteTarget = null },
+        context = context
+    )
 }

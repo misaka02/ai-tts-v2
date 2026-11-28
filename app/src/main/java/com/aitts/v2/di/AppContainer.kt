@@ -28,6 +28,7 @@ import com.aitts.v2.reader.EpubImageLoader
 import com.aitts.v2.reader.GoogleDriveRepository
 import com.aitts.v2.reader.LibrarySyncEngine
 import com.aitts.v2.reader.LocalSyncFolderManager
+import com.aitts.v2.reader.MoonReaderDriveMigrator
 import com.aitts.v2.reader.ReadiumEngine
 import com.aitts.v2.reader.ReaderTtsController
 import com.aitts.v2.reader.WebDavRepository
@@ -125,6 +126,7 @@ class AppContainer(context: Context) {
     val webDav = WebDavRepository(appContext, secretStore, webDavClient, bookImportManager)
     val localSyncFolder = LocalSyncFolderManager(appContext, bookImportManager)
     val syncEngine = LibrarySyncEngine(appContext, bookLibrary, localSyncFolder, googleDrive, webDav)
+    val moonMigrator = MoonReaderDriveMigrator(googleDrive, bookLibrary)
     val epubImageLoader = EpubImageLoader(bookLibrary)
     val bookImageExporter = BookImageExportHelper(appContext, bookLibrary, readiumEngine)
     val readerTts = ReaderTtsController(

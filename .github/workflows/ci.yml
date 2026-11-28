@@ -3,8 +3,6 @@ name: CI & Release
 on:
   push:
     branches: [ main ]
-    tags:
-      - 'v*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -42,28 +40,32 @@ jobs:
       - name: Detekt, Unit Tests & Lint
         run: ./gradlew detekt :core-model:test :core-engine:test :app:testCloudDebugUnitTest :app:lintCloudDebug --no-daemon
 
+      - name: Decode Release Keystore (if configured)
+        id: keystore
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.AITTS_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.AITTS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AITTS_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.AITTS_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+            echo "Release signing secrets incomplete; APK artifacts will not be uploaded."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/ai-tts-release.jks"
+          echo "AITTS_KEYSTORE_FILE=$RUNNER_TEMP/ai-tts-release.jks" >> "$GITHUB_ENV"
+          echo "AITTS_KEYSTORE_PASSWORD=$STORE_PASS" >> "$GITHUB_ENV"
+          echo "AITTS_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "AITTS_KEY_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
       - name: Build R8 Release APKs (cloud & full)
         run: ./gradlew assembleR8Release --no-daemon
 
       - name: Upload R8 Release APK Artifacts
+        if: steps.keystore.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: aitts-v2-r8-release-apks
           path: app/build/outputs/apk/*/release/*.apk
-
-      - name: Prepare Release Assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          mkdir -p release_apks
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          cp app/build/outputs/apk/cloud/release/*.apk "release_apks/ai-tts-v2-cloud-${TAG_NAME}.apk"
-          cp app/build/outputs/apk/full/release/*.apk "release_apks/ai-tts-v2-full-arm64-${TAG_NAME}.apk"
-
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release_apks/*
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
-          generate_release_notes: true

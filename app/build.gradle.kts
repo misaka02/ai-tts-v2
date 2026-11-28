@@ -27,8 +27,8 @@ android {
         applicationId = "com.aitts.engine"
         minSdk = 26
         targetSdk = 34
-        versionCode = 200
-        versionName = "2.0.0"
+        versionCode = 201
+        versionName = "2.8.0-pre.1"
 
         buildConfigField("String", "GDRIVE_DEFAULT_CLIENT_ID", buildSecretField("AITTS_GDRIVE_CLIENT_ID", "aitts.gdrive.clientId"))
 
@@ -55,9 +55,13 @@ android {
 
     signingConfigs {
         val keystorePath = System.getenv("AITTS_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+            ?: localProps.getProperty("aitts.keystore.file")?.trim()?.takeIf { it.isNotEmpty() }
         val storePass = System.getenv("AITTS_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+            ?: localProps.getProperty("aitts.keystore.password")?.trim()?.takeIf { it.isNotEmpty() }
         val alias = System.getenv("AITTS_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+            ?: localProps.getProperty("aitts.key.alias")?.trim()?.takeIf { it.isNotEmpty() }
         val keyPass = System.getenv("AITTS_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+            ?: localProps.getProperty("aitts.key.password")?.trim()?.takeIf { it.isNotEmpty() }
         if (keystorePath != null && storePass != null && alias != null && keyPass != null && file(keystorePath).exists()) {
             create("release") {
                 storeFile = file(keystorePath)

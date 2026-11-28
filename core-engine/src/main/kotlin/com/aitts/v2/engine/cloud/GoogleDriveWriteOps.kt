@@ -102,6 +102,40 @@ class GoogleDriveWriteOps(private val client: GoogleDriveClient) {
         }
     }
 
+    suspend fun moveFile(
+        config: GoogleDriveAuthConfig,
+        fileId: String,
+        oldParentId: String,
+        newParentId: String,
+        onTokenRefreshed: (GoogleDriveAuthConfig) -> Unit = {}
+    ): Result<DriveFileItem> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!GoogleDriveClient.DRIVE_ID_RE.matches(fileId)) throw IOException("无效的文件 ID")
+            if (!GoogleDriveClient.DRIVE_ID_RE.matches(newParentId) && newParentId != "root") {
+                throw IOException("无效的目标文件夹 ID")
+            }
+            val removePart = if (oldParentId.isNotBlank() &&
+                (oldParentId == "root" || GoogleDriveClient.DRIVE_ID_RE.matches(oldParentId))
+            ) {
+                "&removeParents=$oldParentId"
+            } else {
+                ""
+            }
+            val url = "${client.apiBaseUrl.trimEnd('/')}/drive/v3/files/$fileId" +
+                "?addParents=$newParentId$removePart&fields=id,name,mimeType,size,modifiedTime&supportsAllDrives=true"
+            client.executeAuthorized(
+                initialConfig = config,
+                url = url,
+                onTokenRefreshed = onTokenRefreshed,
+                requestBuilder = { b -> b.patch("{}".toRequestBody(jsonMedia)) }
+            ) { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) throw IOException("移动失败 (${resp.code}): ${client.extractErrorMessage(body)}")
+                parseSingleItem(body)
+            }
+        }
+    }
+
     suspend fun uploadFile(
         config: GoogleDriveAuthConfig,
         parentId: String,

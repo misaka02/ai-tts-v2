@@ -59,5 +59,7 @@ data class SyncSummary(
     val pushedBooks: Int = 0,
     val importedToShelf: Int = 0,
     val mergedStates: Int = 0,
-    val skipped: Int = 0
+    val skipped: Int = 0,
+    val deletedLocal: Int = 0,
+    val deletedRemote: Int = 0
 )

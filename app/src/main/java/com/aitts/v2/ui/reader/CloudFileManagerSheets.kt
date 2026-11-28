@@ -1,27 +1,36 @@
 package com.aitts.v2.ui.reader
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,155 +40,222 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aitts.v2.engine.cloud.CloudFileNode
-import com.aitts.v2.ui.theme.InkPaperCard
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
-fun CloudConnectedBar(label: String, onSync: () -> Unit, onDisconnect: () -> Unit) {
-    InkPaperCard(padding = 12.dp) {
-        Text(label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSync, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.size(4.dp))
-                Text("双向同步本地专有目录")
+fun CloudStatusActionStrip(
+    source: FileSourceTab,
+    title: String,
+    syncTargetLabel: String,
+    onOpenSync: () -> Unit,
+    onScanMoon: (() -> Unit)? = null,
+    secondaryActionLabel: String,
+    onSecondaryAction: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = if (source == FileSourceTab.LOCAL) Icons.Outlined.Folder else Icons.Outlined.CloudDone,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (syncTargetLabel.isNotBlank()) {
+                    Text(
+                        text = "同步目录：$syncTargetLabel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-            OutlinedButton(onClick = onDisconnect) { Text("断开") }
+            if (onScanMoon != null) {
+                FilledTonalButton(
+                    onClick = onScanMoon,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Outlined.AutoStories, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("静读天下", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Button(
+                onClick = onOpenSync,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("同步", style = MaterialTheme.typography.labelMedium)
+            }
+            TextButton(
+                onClick = onSecondaryAction,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+            ) {
+                Text(secondaryActionLabel, style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FileNodeRow(
+fun CloudFileListItem(
     node: CloudFileNode,
+    source: FileSourceTab,
     selected: Boolean,
+    selectionMode: Boolean,
+    isImported: Boolean,
     formattedSize: String,
+    hasFoldersInDir: Boolean,
     onToggleSelect: () -> Unit,
     onClick: () -> Unit,
+    onDownloadLocal: (() -> Unit)? = null,
+    onScanMoonHere: (() -> Unit)? = null,
+    onMoveToFolder: (() -> Unit)? = null,
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
-    InkPaperCard(padding = 10.dp) {
-        Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }, verticalAlignment = Alignment.CenterVertically) {
-            if (!node.isFolder) {
-                Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
-                Icon(
-                    Icons.Outlined.Description,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.padding(end = 8.dp)
+    var menuExpanded by remember { mutableStateOf(false) }
+    val dateStr = remember(node.modifiedTimeMs) {
+        if (node.modifiedTimeMs > 0L) SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(node.modifiedTimeMs)) else ""
+    }
+    val subText = listOfNotNull(
+        formattedSize.takeIf { it.isNotBlank() },
+        dateStr.takeIf { it.isNotBlank() }
+    ).joinToString(" · ")
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent)
+                .combinedClickable(
+                    onClick = { if (selectionMode) onToggleSelect() else onClick() },
+                    onLongClick = onToggleSelect
                 )
-            } else {
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (selectionMode) {
                 Icon(
-                    Icons.Outlined.Folder,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(12.dp)
+                    imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = "选择",
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 10.dp).size(22.dp)
                 )
             }
-            Column(modifier = Modifier.weight(1f)) {
+            FileTypeBadge(node = node)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = node.name,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(formattedSize, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (subText.isNotBlank()) {
+                        Text(subText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (isImported) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "已在书架",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
             }
-            IconButton(onClick = onRename) { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = "重命名") }
-            IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除") }
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    if (!node.isFolder && node.isSupportedEbook) {
+                        DropdownMenuItem(text = { Text("导入并阅读") }, onClick = { menuExpanded = false; onClick() })
+                        if (source != FileSourceTab.LOCAL && onDownloadLocal != null) {
+                            DropdownMenuItem(
+                                text = { Text("下载到本地同步目录") },
+                                onClick = { menuExpanded = false; onDownloadLocal() }
+                            )
+                        }
+                    }
+                    if (node.isFolder && node.name.equals(".Moon+", true) && onScanMoonHere != null) {
+                        DropdownMenuItem(
+                            text = { Text("继承此静读天下书库") },
+                            onClick = { menuExpanded = false; onScanMoonHere() }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(if (selected) "取消勾选" else "勾选批量操作") },
+                        onClick = { menuExpanded = false; onToggleSelect() }
+                    )
+                    if (source == FileSourceTab.GOOGLE_DRIVE && hasFoldersInDir && onMoveToFolder != null) {
+                        DropdownMenuItem(
+                            text = { Text("移动到子文件夹") },
+                            onClick = { menuExpanded = false; onMoveToFolder() }
+                        )
+                    }
+                    DropdownMenuItem(text = { Text("重命名") }, onClick = { menuExpanded = false; onRename() })
+                    DropdownMenuItem(text = { Text("删除") }, onClick = { menuExpanded = false; onDelete() })
+                }
+            }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
     }
 }
 
 @Composable
-fun WebDavConnectCard(
-    url: String,
-    user: String,
-    pass: String,
-    rootPath: String,
-    isBusy: Boolean,
-    onUpdate: (String?, String?, String?, String?) -> Unit,
-    onConnect: () -> Unit
-) {
-    InkPaperCard(padding = 16.dp) {
-        Text("连接 WebDAV 网盘", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(
-            text = "原生兼容 Alist、坚果云、Nextcloud、群晖 NAS 等标准 WebDAV 服务，连接后可像本地目录一样浏览并双向同步。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        OutlinedTextField(
-            value = url,
-            onValueChange = { onUpdate(it, null, null, null) },
-            label = { Text("服务器地址 (如 https://dav.example.com/dav)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = user,
-                onValueChange = { onUpdate(null, it, null, null) },
-                label = { Text("用户名") },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = pass,
-                onValueChange = { onUpdate(null, null, it, null) },
-                label = { Text("应用密码") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.weight(1f)
-            )
-        }
-        OutlinedTextField(
-            value = rootPath,
-            onValueChange = { onUpdate(null, null, null, it) },
-            label = { Text("默认根目录") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Button(onClick = onConnect, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
-            Text("校验并连接 WebDAV")
+private fun FileTypeBadge(node: CloudFileNode) {
+    val ext = node.name.substringAfterLast('.', "").uppercase()
+    val (label, bg, fg) = when {
+        node.isFolder && node.name.equals(".Moon+", true) ->
+            Triple("MOON", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+        node.isFolder ->
+            Triple("DIR", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
+        ext == "EPUB" ->
+            Triple("EPUB", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+        ext in setOf("TXT", "TEXT", "MD", "HTML", "HTM") ->
+            Triple(ext.take(4), MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+        else ->
+            Triple(ext.ifBlank { "FILE" }.take(4), MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Surface(color = bg, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(40.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = fg)
         }
     }
-}
-
-@Composable
-fun TextInputDialog(
-    title: String,
-    initialValue: String,
-    label: String,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var value by remember(initialValue) { mutableStateOf(initialValue) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(label) }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onConfirm(value) }) { Text("确认") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
-}
-
-@Composable
-fun DeleteFileConfirmDialog(
-    node: CloudFileNode,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("删除确认") },
-        text = { Text("确定要删除「${node.name}」吗？") },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("删除") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
 }

@@ -141,6 +141,42 @@ class LocalSyncFolderManager(
         }
     }
 
+    suspend fun writeUriIntoFolder(relativePath: String, uri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val rawName = runCatching {
+                appContext.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null }
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "upload.epub"
+            val clean = sanitizeName(rawName)
+            val stage = File(appContext.cacheDir, "local_up_${System.nanoTime()}.bin")
+            try {
+                appContext.contentResolver.openInputStream(uri)?.use { input ->
+                    stage.outputStream().use { input.copyTo(it) }
+                } ?: throw IOException("无法读取源文件")
+                val treeUri = _treeUriFlow.value
+                if (treeUri != null) {
+                    val folder = resolveSafFolder(treeUri, relativePath) ?: throw IOException("目标目录不可写")
+                    val created = folder.createFile("application/octet-stream", "tmp_${System.nanoTime()}_$clean")
+                        ?: throw IOException("创建文件失败")
+                    appContext.contentResolver.openOutputStream(created.uri)?.use { out ->
+                        stage.inputStream().use { it.copyTo(out) }
+                    } ?: run { created.delete(); throw IOException("无法写入目标文件") }
+                    folder.findFile(clean)?.delete()
+                    if (!created.renameTo(clean)) {
+                        created.delete()
+                        throw IOException("重命名上传文件失败")
+                    }
+                } else {
+                    val dest = File(resolveLocalDir(relativePath), clean)
+                    stage.copyTo(dest, overwrite = true)
+                }
+            } finally {
+                stage.delete()
+            }
+            Unit
+        }
+    }
+
     suspend fun copyNodeToTempFile(node: CloudFileNode, outFile: File): File = withContext(Dispatchers.IO) {
         val treeUri = _treeUriFlow.value
         if (treeUri != null) {

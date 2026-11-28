@@ -19,6 +19,14 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+-keep,includedescriptorclasses class com.aitts.v2.reader.**$$serializer { *; }
+-keepclassmembers class com.aitts.v2.reader.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.aitts.v2.reader.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
 -keep,includedescriptorclasses class com.aitts.v2.engine.cloud.**$$serializer { *; }
 -keepclassmembers class com.aitts.v2.engine.cloud.** {
     *** Companion;

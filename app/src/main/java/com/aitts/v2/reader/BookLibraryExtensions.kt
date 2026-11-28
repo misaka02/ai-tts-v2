@@ -109,3 +109,46 @@ fun BookLibraryRepository.mergeRemoteStates(remoteRecords: List<BookRecord>): In
     }
     return mergedCount
 }
+
+fun BookLibraryRepository.applyMoonReaderMetadata(
+    bookId: String,
+    meta: com.aitts.v2.reader.moon.MoonBookMeta?,
+    position: com.aitts.v2.reader.moon.MoonReadingPosition?,
+    annotations: List<com.aitts.v2.reader.moon.MoonAnnotation>,
+    fallbackCoverBytes: ByteArray?
+) {
+    val existing = getBook(bookId) ?: return
+    var nextCoverName = existing.coverFileName
+    if (nextCoverName.isNullOrBlank() && fallbackCoverBytes != null && fallbackCoverBytes.size in 64..(6 * 1024 * 1024)) {
+        val coverFile = File(bookDir(bookId), "cover_moon.png")
+        runCatching { coverFile.writeBytes(fallbackCoverBytes) }.onSuccess { nextCoverName = coverFile.name }
+    }
+    val importedHighlights = com.aitts.v2.reader.moon.MoonReaderBackupParser.toBookHighlights(annotations)
+    val importedBookmarks = com.aitts.v2.reader.moon.MoonReaderBackupParser.toBookBookmarks(annotations, position)
+    mutateBook(bookId) { book ->
+        val total = book.chapterCount.coerceAtLeast(1)
+        val hasLocalZeroProgress = book.progress.chapterIndex == 0 && book.progress.totalProgression <= 0.001f
+        val nextProgress = if (position != null && (position.timestampMs > book.progress.updatedAt || hasLocalZeroProgress)) {
+            book.progress.copy(
+                chapterIndex = position.chapterIndex.coerceIn(0, total - 1),
+                charOffset = position.charOffset.coerceAtLeast(0),
+                totalProgression = (position.percent / 100f).coerceIn(0f, 1f),
+                totalChapters = total,
+                updatedAt = maxOf(book.progress.updatedAt, position.timestampMs)
+            )
+        } else {
+            book.progress
+        }
+        book.copy(
+            title = meta?.bookName?.trim()?.takeIf { it.isNotBlank() } ?: book.title,
+            author = book.author.ifBlank { meta?.cleanAuthor.orEmpty() },
+            category = meta?.shelfGroup?.takeIf { it.isNotBlank() } ?: book.category,
+            coverFileName = nextCoverName,
+            addedAt = meta?.addedAtMs?.takeIf { it > 0L } ?: book.addedAt,
+            lastReadAt = maxOf(book.lastReadAt, position?.timestampMs ?: 0L),
+            progress = nextProgress,
+            bookmarks = (book.bookmarks + importedBookmarks).distinctBy { it.id },
+            highlights = (book.highlights + importedHighlights).distinctBy { it.id }
+        )
+    }
+}

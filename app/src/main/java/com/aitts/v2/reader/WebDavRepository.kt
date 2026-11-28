@@ -75,6 +75,42 @@ class WebDavRepository(
     suspend fun downloadToFile(itemPath: String, destFile: File): Result<File> =
         client.downloadFile(_configFlow.value, itemPath, destFile)
 
+    suspend fun uploadFromUri(parentPath: String, uri: android.net.Uri): Result<Unit> = withContext(Dispatchers.IO) {
+        val rawName = resolveUriDisplayName(appContext, uri)
+        val cleanName = rawName.replace(Regex("[/\\\\:*?\"<>|]"), "_").trim('.').ifBlank { "upload.epub" }
+        val upDir = File(appContext.cacheDir, "webdav_up").apply { mkdirs() }
+        val safeTmp = cleanName.take(32).replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "upload.bin" }
+        val tmp = File(upDir, "${UUID.randomUUID().toString().take(8)}_$safeTmp")
+        try {
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                tmp.outputStream().use { out -> input.copyTo(out) }
+            } ?: return@withContext Result.failure(IOException("无法读取待上传文件"))
+            val cleanParent = parentPath.trim('/')
+            val remotePath = if (cleanParent.isEmpty()) cleanName else "$cleanParent/$cleanName"
+            uploadFile(remotePath, tmp)
+        } catch (t: Throwable) {
+            Result.failure(t)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    suspend fun downloadToLocalSyncFolder(node: CloudFileNode, localSync: LocalSyncFolderManager): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val dlDir = File(appContext.cacheDir, "webdav_dl").apply { mkdirs() }
+            val safeTmp = node.name.take(32).replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "dl.bin" }
+            val tmp = File(dlDir, "${UUID.randomUUID().toString().take(8)}_$safeTmp")
+            try {
+                downloadToFile(node.path, tmp).getOrThrow()
+                localSync.writeTempFileIntoDedicatedRoot(node.name, tmp)
+                Result.success(Unit)
+            } catch (t: Throwable) {
+                Result.failure(t)
+            } finally {
+                tmp.delete()
+            }
+        }
+
     suspend fun downloadAndImport(
         item: CloudFileNode,
         onProgress: (Float) -> Unit

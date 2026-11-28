@@ -9,7 +9,6 @@ import com.aitts.v2.engine.cloud.DriveFileItem
 import com.aitts.v2.engine.cloud.GoogleDriveAuthConfig
 import com.aitts.v2.engine.cloud.GoogleDriveClient
 import com.aitts.v2.engine.cloud.GoogleDriveWriteOps
-import com.aitts.v2.reader.model.BookRecord
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
@@ -36,9 +35,9 @@ class GoogleDriveRepository(
     context: Context,
     private val secretStore: SecretStore,
     private val driveClient: GoogleDriveClient,
-    private val bookImportManager: BookImportManager
+    internal val bookImportManager: BookImportManager
 ) {
-    private val appContext = context.applicationContext
+    internal val appContext = context.applicationContext
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val configLock = Any()
     private val writeOps = GoogleDriveWriteOps(driveClient)
@@ -157,6 +156,9 @@ class GoogleDriveRepository(
     suspend fun deleteItem(fileId: String): Result<Unit> =
         withDriveRetry { cfg -> writeOps.trashFile(cfg, fileId) { saveConfig(it) } }
 
+    suspend fun moveItem(fileId: String, oldParentId: String, newParentId: String): Result<DriveFileItem> =
+        withDriveRetry { cfg -> writeOps.moveFile(cfg, fileId, oldParentId, newParentId) { saveConfig(it) } }
+
     suspend fun uploadFile(
         parentId: String,
         file: File,
@@ -166,8 +168,15 @@ class GoogleDriveRepository(
         writeOps.uploadFile(cfg, parentId, remoteName, mimeForName(remoteName), file, existingId) { saveConfig(it) }
     }
 
-    suspend fun downloadToFile(fileId: String, destFile: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Result<File> =
-        withDriveRetry { cfg -> driveClient.downloadFile(cfg, fileId, destFile, onProgress = onProgress) { saveConfig(it) } }
+    suspend fun downloadToFile(
+        fileId: String,
+        destFile: File,
+        maxBytes: Long = 200L * 1024 * 1024,
+        onProgress: (Long, Long) -> Unit = { _, _ -> }
+    ): Result<File> =
+        withDriveRetry { cfg ->
+            driveClient.downloadFile(cfg, fileId, destFile, maxBytes = maxBytes, onProgress = onProgress) { saveConfig(it) }
+        }
 
     private suspend fun <T> withDriveRetry(block: suspend (GoogleDriveAuthConfig) -> Result<T>): Result<T> {
         var cfg = _authFlow.value
@@ -198,27 +207,6 @@ class GoogleDriveRepository(
             val updated = previous.copy(accessToken = nextToken, expiresAtEpochMs = System.currentTimeMillis() + 50 * 60_000L)
             runCatching { saveConfig(updated); updated }
         }
-
-    suspend fun downloadAndImport(
-        item: CloudFileNode,
-        onProgress: (Float) -> Unit
-    ): Result<BookRecord> = withContext(Dispatchers.IO) {
-        val dlDir = File(appContext.cacheDir, "drive_dl").apply { mkdirs() }
-        val tmpFile = File(dlDir, "${UUID.randomUUID().toString().take(8)}_${item.name.take(32).replace(Regex("[^a-zA-Z0-9._-]"), "_")}")
-        try {
-            downloadToFile(item.id, tmpFile) { done, total ->
-                val knownTotal = if (total > 0L) total else item.sizeBytes
-                if (knownTotal > 0L) onProgress((done.toFloat() / knownTotal).coerceIn(0f, 1f))
-            }.getOrThrow()
-            tmpFile.inputStream().use { stream ->
-                bookImportManager.importFromStream(item.name, stream, sourceSyncKey = "gdrive:${item.id}").getOrThrow()
-            }.let { Result.success(it) }
-        } catch (t: Throwable) {
-            Result.failure(t)
-        } finally {
-            tmpFile.delete()
-        }
-    }
 
     @Suppress("DEPRECATION")
     fun getSigningSha1(): String = runCatching {
@@ -264,6 +252,7 @@ private fun DriveFileItem.toCloudNode() = CloudFileNode(
     path = id,
     isFolder = isFolder,
     sizeBytes = sizeBytes,
+    modifiedTimeMs = runCatching { java.time.Instant.parse(modifiedTime).toEpochMilli() }.getOrDefault(0L),
     mimeType = mimeType
 )
 
